@@ -11,7 +11,3 @@ This prerelease is intended for early validation of hash-fragment routing in bro
 ```bash
 dotnet add package Blazor.HashRouting --version {{NUGET_VERSION}}
 ```
-
-## Notes
-
-- This file is used as a fallback for alpha builds when no version-line-specific alpha notes file exists.
