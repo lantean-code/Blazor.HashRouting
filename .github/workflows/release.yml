@@ -193,26 +193,15 @@ jobs:
 
       - name: Push package to NuGet
         if: steps.release_channel.outputs.channel != 'none'
-        id: push_package
         shell: bash
         run: |
-          set -o pipefail
-
-          push_output_file="$(mktemp)"
-
           dotnet nuget push "/tmp/artifacts/blazor-hashrouting/package/release/Blazor.HashRouting.${VERSION}.nupkg" \
             --api-key "${{ secrets.NUGET_API_KEY }}" \
             --source "https://api.nuget.org/v3/index.json" \
-            --skip-duplicate 2>&1 | tee "${push_output_file}"
-
-          if grep -qi "already exists" "${push_output_file}"; then
-            echo "pushed=false" >> $GITHUB_OUTPUT
-          else
-            echo "pushed=true" >> $GITHUB_OUTPUT
-          fi
+            --skip-duplicate
 
       - name: Push symbols to NuGet
-        if: steps.release_channel.outputs.channel != 'none' && steps.push_package.outputs.pushed == 'true'
+        if: steps.release_channel.outputs.channel != 'none'
         shell: bash
         run: |
           dotnet nuget push "/tmp/artifacts/blazor-hashrouting/package/release/Blazor.HashRouting.${VERSION}.snupkg" \
