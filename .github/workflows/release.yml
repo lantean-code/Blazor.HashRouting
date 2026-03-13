@@ -17,6 +17,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -32,8 +33,12 @@ jobs:
         id: gitversion
         shell: bash
         run: |
+          MAJOR_MINOR_PATCH=$(dotnet gitversion /output json /showvariable MajorMinorPatch)
+          PRE_RELEASE_LABEL=$(dotnet gitversion /output json /showvariable PreReleaseLabel)
           VERSION=$(dotnet gitversion /output json /showvariable SemVer)
           SAFE_VERSION=$(echo "$VERSION" | sed -E 's/[^A-Za-z0-9._+-]+/-/g')
+          echo "MAJOR_MINOR_PATCH=$MAJOR_MINOR_PATCH" >> $GITHUB_ENV
+          echo "PRE_RELEASE_LABEL=$PRE_RELEASE_LABEL" >> $GITHUB_ENV
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "VERSION_SAFE=$SAFE_VERSION" >> $GITHUB_ENV
 
@@ -113,6 +118,45 @@ jobs:
           echo "::error::Expected an existing git tag '${VERSION}' (or 'v${VERSION}') before creating a stable release."
           exit 1
 
+      - name: Resolve Release Notes File
+        if: steps.release_channel.outputs.channel != 'none'
+        id: release_notes
+        shell: bash
+        run: |
+          if [ "${{ steps.release_channel.outputs.channel }}" = "stable" ]; then
+            notes_file="release-notes/${MAJOR_MINOR_PATCH}.md"
+          else
+            notes_file="release-notes/${MAJOR_MINOR_PATCH}-${{ steps.release_channel.outputs.channel }}.md"
+          fi
+
+          if [ ! -f "${notes_file}" ]; then
+            fallback_notes_file="release-notes/${{ steps.release_channel.outputs.channel }}.md"
+
+            if [ -f "${fallback_notes_file}" ]; then
+              notes_file="${fallback_notes_file}"
+            else
+              echo "::error::Expected release notes file '${notes_file}' was not found and fallback '${fallback_notes_file}' was not available."
+              exit 1
+            fi
+          fi
+
+          echo "file=${notes_file}" >> $GITHUB_OUTPUT
+
+      - name: Render Release Notes
+        if: steps.release_channel.outputs.channel != 'none'
+        id: render_release_notes
+        shell: bash
+        run: |
+          rendered_notes_file="$(mktemp)"
+
+          sed \
+            -e "s/{{VERSION}}/${VERSION}/g" \
+            -e "s/{{NUGET_VERSION}}/${VERSION}/g" \
+            -e "s/{{MAJOR_MINOR_PATCH}}/${MAJOR_MINOR_PATCH}/g" \
+            "${{ steps.release_notes.outputs.file }}" > "${rendered_notes_file}"
+
+          echo "file=${rendered_notes_file}" >> $GITHUB_OUTPUT
+
       - name: Create GitHub release
         if: steps.release_channel.outputs.channel != 'none'
         env:
@@ -130,6 +174,9 @@ jobs:
           fi
 
           if gh release view "${{ steps.resolve_tag.outputs.tag }}" >/dev/null 2>&1; then
+            gh release edit "${{ steps.resolve_tag.outputs.tag }}" \
+              --notes-file "${{ steps.render_release_notes.outputs.file }}"
+
             gh release upload "${{ steps.resolve_tag.outputs.tag }}" \
               /tmp/artifacts/blazor-hashrouting/package/release/Blazor.HashRouting.${VERSION}.nupkg \
               /tmp/artifacts/blazor-hashrouting/package/release/Blazor.HashRouting.${VERSION}.snupkg \
@@ -140,6 +187,7 @@ jobs:
               /tmp/artifacts/blazor-hashrouting/package/release/Blazor.HashRouting.${VERSION}.snupkg \
               --title "${{ steps.release_channel.outputs.label }} ${{ steps.resolve_tag.outputs.tag }}" \
               --target "${GITHUB_SHA}" \
+              --notes-file "${{ steps.render_release_notes.outputs.file }}" \
               "${release_args[@]}"
           fi
 
