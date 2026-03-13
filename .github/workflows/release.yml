@@ -1,0 +1,162 @@
+name: Release and Publish
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install GitVersion
+        uses: gittools/actions/gitversion/setup@v3.0.0
+        with:
+          versionSpec: '6.0.0'
+
+      - name: Determine Version
+        id: gitversion
+        shell: bash
+        run: |
+          VERSION=$(dotnet gitversion /output json /showvariable NuGetVersionV2)
+          SAFE_VERSION=$(echo "$VERSION" | sed -E 's/[^A-Za-z0-9._+-]+/-/g')
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "VERSION_SAFE=$SAFE_VERSION" >> $GITHUB_ENV
+
+      - name: Set Release Channel
+        id: release_channel
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF}" = "refs/heads/master" ]; then
+            echo "channel=stable" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+            echo "draft=true" >> $GITHUB_OUTPUT
+            echo "label=Release" >> $GITHUB_OUTPUT
+          elif [[ "${GITHUB_REF}" == refs/heads/release/* || "${GITHUB_REF}" == refs/heads/hotfix/* ]]; then
+            echo "channel=rc" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+            echo "draft=true" >> $GITHUB_OUTPUT
+            echo "label=RC" >> $GITHUB_OUTPUT
+          elif [ "${GITHUB_REF}" = "refs/heads/develop" ]; then
+            echo "channel=beta" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+            echo "draft=true" >> $GITHUB_OUTPUT
+            echo "label=Beta" >> $GITHUB_OUTPUT
+          elif [[ "${GITHUB_REF}" == refs/heads/feature/* ]]; then
+            echo "channel=alpha" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+            echo "draft=false" >> $GITHUB_OUTPUT
+            echo "label=Alpha" >> $GITHUB_OUTPUT
+          else
+            echo "channel=none" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+            echo "draft=false" >> $GITHUB_OUTPUT
+            echo "label=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Validate releasable branch
+        if: steps.release_channel.outputs.channel == 'none'
+        shell: bash
+        run: |
+          echo "::error::Releases are only supported from master, develop, feature/*, release/*, and hotfix/* branches."
+          exit 1
+
+      - name: Restore dependencies
+        run: dotnet restore --artifacts-path=/tmp/artifacts/blazor-hashrouting
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore --artifacts-path=/tmp/artifacts/blazor-hashrouting
+
+      - name: Run tests
+        run: dotnet test --configuration Release --no-build --artifacts-path=/tmp/artifacts/blazor-hashrouting
+
+      - name: Pack
+        run: dotnet pack src/Blazor.HashRouting/Blazor.HashRouting.csproj --configuration Release --no-build --artifacts-path=/tmp/artifacts/blazor-hashrouting
+
+      - name: Resolve Release Tag
+        if: steps.release_channel.outputs.channel != 'none'
+        id: resolve_tag
+        shell: bash
+        run: |
+          if git rev-parse "${VERSION}" >/dev/null 2>&1; then
+            echo "tag=${VERSION}" >> $GITHUB_OUTPUT
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Using existing tag '${VERSION}'"
+          elif git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Using existing tag 'v${VERSION}'"
+          else
+            echo "tag=${VERSION}" >> $GITHUB_OUTPUT
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "::warning::No matching git tag found for '${VERSION}' or 'v${VERSION}'."
+          fi
+
+      - name: Ensure master tag exists
+        if: steps.release_channel.outputs.channel == 'stable' && steps.resolve_tag.outputs.exists != 'true'
+        shell: bash
+        run: |
+          echo "::error::Expected an existing git tag '${VERSION}' (or 'v${VERSION}') before creating a stable release."
+          exit 1
+
+      - name: Create GitHub release
+        if: steps.release_channel.outputs.channel != 'none'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          release_args=()
+
+          if [ "${{ steps.release_channel.outputs.prerelease }}" = "true" ]; then
+            release_args+=("--prerelease")
+          fi
+
+          if [ "${{ steps.release_channel.outputs.draft }}" = "true" ]; then
+            release_args+=("--draft")
+          fi
+
+          if gh release view "${{ steps.resolve_tag.outputs.tag }}" >/dev/null 2>&1; then
+            gh release upload "${{ steps.resolve_tag.outputs.tag }}" \
+              /tmp/artifacts/blazor-hashrouting/package/release/Blazor.HashRouting.${VERSION}.nupkg \
+              /tmp/artifacts/blazor-hashrouting/package/release/Blazor.HashRouting.${VERSION}.snupkg \
+              --clobber
+          else
+            gh release create "${{ steps.resolve_tag.outputs.tag }}" \
+              /tmp/artifacts/blazor-hashrouting/package/release/Blazor.HashRouting.${VERSION}.nupkg \
+              /tmp/artifacts/blazor-hashrouting/package/release/Blazor.HashRouting.${VERSION}.snupkg \
+              --title "${{ steps.release_channel.outputs.label }} ${{ steps.resolve_tag.outputs.tag }}" \
+              --target "${GITHUB_SHA}" \
+              "${release_args[@]}"
+          fi
+
+      - name: Push package to NuGet
+        if: steps.release_channel.outputs.channel != 'none'
+        shell: bash
+        run: |
+          dotnet nuget push "/tmp/artifacts/blazor-hashrouting/package/release/Blazor.HashRouting.${VERSION}.nupkg" \
+            --api-key "${{ secrets.NUGET_API_KEY }}" \
+            --source "https://api.nuget.org/v3/index.json" \
+            --skip-duplicate
+
+      - name: Push symbols to NuGet
+        if: steps.release_channel.outputs.channel != 'none'
+        shell: bash
+        run: |
+          dotnet nuget push "/tmp/artifacts/blazor-hashrouting/package/release/Blazor.HashRouting.${VERSION}.snupkg" \
+            --api-key "${{ secrets.NUGET_API_KEY }}" \
+            --source "https://api.nuget.org/v3/index.json" \
+            --skip-duplicate
