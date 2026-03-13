@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="AGENTS.md" />
+    <File Path="CHANGELOG.md" />
+    <File Path="README.md" />
+  </Folder>
+  <Folder Name="/src/">
+    <File Path="src/AGENTS.md" />
+    <Project Path="src/Blazor.HashRouting/Blazor.HashRouting.csproj" />
+  </Folder>
+  <Folder Name="/test/">
+    <File Path="test/AGENTS.md" />
+    <Project Path="test/Blazor.HashRouting.Test/Blazor.HashRouting.Test.csproj" />
+  </Folder>
+</Solution>

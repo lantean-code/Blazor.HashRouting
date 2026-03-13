@@ -1,0 +1,502 @@
+using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using AwesomeAssertions;
+using Jint;
+using Jint.Native;
+
+namespace Blazor.HashRouting.Test
+{
+    public sealed class HashRoutingJavaScriptBehaviorTests
+    {
+        private readonly HashRoutingJavaScriptTestHost _target;
+
+        public HashRoutingJavaScriptBehaviorTests()
+        {
+            _target = new HashRoutingJavaScriptTestHost();
+        }
+
+        [Fact]
+        public void GIVEN_PathLocationUnderBasePath_WHEN_InitializeCalled_THEN_LocationIsRewrittenToCanonicalHashRelativeToBasePath()
+        {
+            var result = _target.Initialize(
+                "http://localhost/proxy/app/",
+                "http://localhost/proxy/app/details/ABC?tab=Peers",
+                "http://localhost/proxy/app/details/ABC?tab=Peers");
+
+            result.Should().Be("http://localhost/proxy/app/details/ABC?tab=Peers");
+            _target.GetLocationHref().Should().Be("http://localhost/proxy/app/#/details/ABC?tab=Peers");
+        }
+
+        [Fact]
+        public void GIVEN_CustomHashPrefixLocation_WHEN_InitializeCalled_THEN_ReturnsPathAbsoluteUriUsingPrefixRoute()
+        {
+            var result = _target.Initialize(
+                "http://localhost/",
+                "http://localhost/#/route/details/ABC?tab=Peers",
+                "http://localhost/",
+                new
+                {
+                    canonicalizeToHash = true,
+                    hashPrefix = "route",
+                    interceptInternalLinks = true
+                });
+
+            result.Should().Be("http://localhost/details/ABC?tab=Peers");
+            _target.GetLocationHref().Should().Be("http://localhost/#/route/details/ABC?tab=Peers");
+        }
+
+        [Fact]
+        public void GIVEN_CustomHashPrefixAndBasePath_WHEN_NavigateToCalled_THEN_HistoryUsesCanonicalHashUriRelativeToBasePath()
+        {
+            _target.Initialize(
+                "http://localhost/proxy/app/",
+                "http://localhost/proxy/app/#/route/",
+                "http://localhost/proxy/app/",
+                new
+                {
+                    canonicalizeToHash = true,
+                    hashPrefix = "route",
+                    interceptInternalLinks = true
+                });
+
+            _target.NavigateTo("http://localhost/proxy/app/settings", false, "state");
+
+            _target.GetLocationHref().Should().Be("http://localhost/proxy/app/#/route/settings");
+            _target.GetHistoryState().Should().BeEquivalentTo(new BrowserHistoryState
+            {
+                HistoryIndex = 1,
+                UserState = "state"
+            });
+        }
+
+        [Fact]
+        public void GIVEN_ReplaceNavigation_WHEN_NavigateToCalled_THEN_HistoryIndexIsRetained()
+        {
+            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
+            _target.SetLocationAndHistory("http://localhost/#/first", null);
+            _target.SetCurrentHistoryIndex(3);
+
+            _target.NavigateTo("http://localhost/second", true, "second");
+
+            _target.GetLocationHref().Should().Be("http://localhost/#/second");
+            _target.GetHistoryState().Should().BeEquivalentTo(new BrowserHistoryState
+            {
+                HistoryIndex = 3,
+                UserState = "second"
+            });
+        }
+
+        [Fact]
+        public void GIVEN_ReplaceExternalNavigation_WHEN_NavigateExternallyCalled_THEN_WindowLocationReplaceIsUsed()
+        {
+            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
+
+            _target.NavigateExternally("https://example.com/path?query=value", true);
+
+            _target.GetLocationHref().Should().Be("https://example.com/path?query=value");
+            _target.GetLastReplacedHref().Should().Be("https://example.com/path?query=value");
+        }
+
+        private sealed class HashRoutingJavaScriptTestHost
+        {
+            private readonly Engine _engine;
+            private static readonly JsonSerializerOptions? _options = new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            };
+
+            public HashRoutingJavaScriptTestHost()
+            {
+                _engine = new Engine();
+                _engine.SetValue("__urlFactory", new JavaScriptUrlFactory());
+                _engine.Execute(_testHarnessScript);
+                _engine.Execute(GetModuleScript());
+            }
+
+            public BrowserHistoryState? GetHistoryState()
+            {
+                var json = _engine.Invoke("__getHistoryStateJson").AsString();
+
+                return JsonSerializer.Deserialize<BrowserHistoryState>(json, _options);
+            }
+
+            public string GetLastReplacedHref()
+            {
+                return _engine.Invoke("__getLastReplacedHref").AsString();
+            }
+
+            public string GetLocationHref()
+            {
+                return _engine.Invoke("__getLocationHref").AsString();
+            }
+
+            public string Initialize(string baseUri, string locationHref, string currentPathUri, object? options = null)
+            {
+                _engine.Invoke("__setDocumentBaseUri", baseUri);
+                SetLocationAndHistory(locationHref, null);
+
+                var initializeOptions = options ?? new
+                {
+                    canonicalizeToHash = true,
+                    hashPrefix = "/",
+                    interceptInternalLinks = true
+                };
+
+                return _engine.Invoke("initialize", _engine.GetValue("dotNetObjectReference"), initializeOptions, baseUri, currentPathUri).AsString();
+            }
+
+            public void NavigateExternally(string uri, bool replaceHistoryEntry)
+            {
+                _engine.Invoke("navigateExternally", uri, replaceHistoryEntry);
+            }
+
+            public void NavigateTo(string pathAbsoluteUri, bool replaceHistoryEntry, string? historyEntryState)
+            {
+                _engine.Invoke("navigateTo", pathAbsoluteUri, replaceHistoryEntry, historyEntryState ?? JsValue.Null);
+            }
+
+            public void SetLocationAndHistory(string href, BrowserHistoryState? state)
+            {
+                if (state is null)
+                {
+                    _engine.Invoke("__setLocationAndHistory", href, JsValue.Null, JsValue.Null);
+                    return;
+                }
+
+                var userState = state.UserState is null
+                    ? JsValue.Null
+                    : JsValue.FromObject(_engine, state.UserState);
+
+                _engine.Invoke("__setLocationAndHistory", href, state.HistoryIndex, userState);
+            }
+
+            public void SetCurrentHistoryIndex(int historyIndex)
+            {
+                _engine.Invoke("__setCurrentHistoryIndex", historyIndex);
+            }
+
+            private static string GetModuleScript()
+            {
+                var path = Path.Combine(AppContext.BaseDirectory, "hash-routing.module.js");
+                var script = File.ReadAllText(path);
+
+                return script.Replace("export function ", "function ", StringComparison.Ordinal);
+            }
+
+            private const string _testHarnessScript = """
+function URL(raw, base) {
+    const inner = __urlFactory.Create(raw, base === undefined || base === null ? null : String(base));
+    const wrapper = Object.create(URL.prototype);
+
+    Object.defineProperties(wrapper, {
+        hash: {
+            get: function() { return inner.Hash; },
+            set: function(value) { inner.Hash = value; }
+        },
+        host: {
+            get: function() { return inner.Host; }
+        },
+        hostname: {
+            get: function() { return inner.Hostname; },
+            set: function(value) { inner.Hostname = value; }
+        },
+        href: {
+            get: function() { return inner.Href; },
+            set: function(value) { inner.Href = value; }
+        },
+        pathname: {
+            get: function() { return inner.Pathname; },
+            set: function(value) { inner.Pathname = value; }
+        },
+        port: {
+            get: function() { return inner.Port; },
+            set: function(value) { inner.Port = value; }
+        },
+        protocol: {
+            get: function() { return inner.Protocol; },
+            set: function(value) { inner.Protocol = value; }
+        },
+        search: {
+            get: function() { return inner.Search; },
+            set: function(value) { inner.Search = value; }
+        }
+    });
+
+    return wrapper;
+}
+
+function Element() {
+}
+
+const dotNetObjectReference = {
+    invokeMethodAsync: function() {
+        return null;
+    }
+};
+
+const document = {
+    baseURI: "http://localhost/",
+    _events: {},
+    addEventListener: function(name, handler) {
+        this._events[name] = handler;
+    },
+    removeEventListener: function(name) {
+        delete this._events[name];
+    }
+};
+
+const window = {
+    _events: {},
+    _lastReplacedHref: "",
+    location: {
+        href: "http://localhost/#/",
+        hash: "#/",
+        replace: function(uri) {
+            window._lastReplacedHref = String(uri);
+            this.href = new URL(uri, this.href).href;
+            __syncLocation();
+        }
+    },
+    history: {
+        state: null,
+        pushState: function(state, unused, uri) {
+            this.state = state;
+            window.location.href = new URL(uri, window.location.href).href;
+            __syncLocation();
+        },
+        replaceState: function(state, unused, uri) {
+            this.state = state;
+            window.location.href = new URL(uri, window.location.href).href;
+            __syncLocation();
+        }
+    },
+    addEventListener: function(name, handler) {
+        this._events[name] = handler;
+    },
+    removeEventListener: function(name) {
+        delete this._events[name];
+    }
+};
+
+function __getHistoryStateJson() {
+    return JSON.stringify(window.history.state);
+}
+
+function __getLastReplacedHref() {
+    return window._lastReplacedHref;
+}
+
+function __getLocationHref() {
+    return window.location.href;
+}
+
+function __setDocumentBaseUri(value) {
+    document.baseURI = value;
+}
+
+function __setLocationAndHistory(href, historyIndex, userState) {
+    window._lastReplacedHref = "";
+    window.location.href = href;
+    if (historyIndex === null || historyIndex === undefined) {
+        window.history.state = null;
+    } else {
+        window.history.state = {
+            _qhrIndex: Number(historyIndex),
+            userState: userState === undefined ? null : userState
+        };
+    }
+    __syncLocation();
+}
+
+function __setCurrentHistoryIndex(value) {
+    hashRoutingState.currentHistoryIndex = Number(value);
+}
+
+function __syncLocation() {
+    const absolute = new URL(window.location.href, document.baseURI);
+    window.location.href = absolute.href;
+    window.location.hash = absolute.hash;
+}
+""";
+        }
+
+        private sealed class JavaScriptUrlFactory
+        {
+            public JavaScriptUrl Create(string raw, string? baseUri)
+            {
+                return new JavaScriptUrl(raw, baseUri);
+            }
+        }
+
+        private sealed class JavaScriptUrl
+        {
+            private UriBuilder _builder;
+
+            public JavaScriptUrl(string raw, string? baseUri)
+            {
+                ArgumentNullException.ThrowIfNull(raw);
+
+                _builder = CreateBuilder(raw, baseUri);
+            }
+
+            public string Hash
+            {
+                get
+                {
+                    return _builder.Fragment.Length == 0 ? string.Empty : _builder.Fragment;
+                }
+
+                set
+                {
+                    _builder.Fragment = NormalizeFragment(value);
+                }
+            }
+
+            public string Host
+            {
+                get
+                {
+                    if (_builder.Port < 0)
+                    {
+                        return _builder.Host;
+                    }
+
+                    return _builder.Host + ":" + _builder.Port.ToString(CultureInfo.InvariantCulture);
+                }
+            }
+
+            public string Hostname
+            {
+                get
+                {
+                    return _builder.Host;
+                }
+
+                set
+                {
+                    _builder.Host = value;
+                }
+            }
+
+            public string Href
+            {
+                get
+                {
+                    return _builder.Uri.AbsoluteUri;
+                }
+
+                set
+                {
+                    _builder = CreateBuilder(value, null);
+                }
+            }
+
+            public string Pathname
+            {
+                get
+                {
+                    return string.IsNullOrEmpty(_builder.Path) ? "/" : _builder.Path;
+                }
+
+                set
+                {
+                    _builder.Path = NormalizePath(value);
+                }
+            }
+
+            public string Port
+            {
+                get
+                {
+                    return _builder.Port < 0 ? string.Empty : _builder.Port.ToString(CultureInfo.InvariantCulture);
+                }
+
+                set
+                {
+                    _builder.Port = string.IsNullOrEmpty(value) ? -1 : int.Parse(value, CultureInfo.InvariantCulture);
+                }
+            }
+
+            public string Protocol
+            {
+                get
+                {
+                    return _builder.Scheme + ":";
+                }
+
+                set
+                {
+                    _builder.Scheme = value.TrimEnd(':');
+                }
+            }
+
+            public string Search
+            {
+                get
+                {
+                    return string.IsNullOrEmpty(_builder.Query) ? string.Empty : _builder.Query;
+                }
+
+                set
+                {
+                    _builder.Query = NormalizeQuery(value);
+                }
+            }
+
+            private static UriBuilder CreateBuilder(string raw, string? baseUri)
+            {
+                var uri = Uri.TryCreate(raw, UriKind.Absolute, out var absoluteUri)
+                    ? absoluteUri
+                    : new Uri(new Uri(baseUri ?? "http://localhost/", UriKind.Absolute), raw);
+
+                return new UriBuilder(uri);
+            }
+
+            private static string NormalizeFragment(string value)
+            {
+                if (string.IsNullOrEmpty(value))
+                {
+                    return string.Empty;
+                }
+
+                return value[0] == '#'
+                    ? value[1..]
+                    : value;
+            }
+
+            private static string NormalizePath(string value)
+            {
+                if (string.IsNullOrEmpty(value))
+                {
+                    return "/";
+                }
+
+                return value[0] == '/'
+                    ? value
+                    : "/" + value;
+            }
+
+            private static string NormalizeQuery(string value)
+            {
+                if (string.IsNullOrEmpty(value))
+                {
+                    return string.Empty;
+                }
+
+                return value[0] == '?'
+                    ? value[1..]
+                    : value;
+            }
+        }
+
+        private sealed class BrowserHistoryState
+        {
+            [JsonPropertyName("_qhrIndex")]
+            public int HistoryIndex { get; init; }
+
+            [JsonPropertyName("userState")]
+            public string? UserState { get; init; }
+        }
+    }
+}
