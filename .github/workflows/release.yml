@@ -32,7 +32,7 @@ jobs:
         id: gitversion
         shell: bash
         run: |
-          VERSION=$(dotnet gitversion /output json /showvariable NuGetVersionV2)
+          VERSION=$(dotnet gitversion /output json /showvariable SemVer)
           SAFE_VERSION=$(echo "$VERSION" | sed -E 's/[^A-Za-z0-9._+-]+/-/g')
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "VERSION_SAFE=$SAFE_VERSION" >> $GITHUB_ENV

@@ -34,7 +34,7 @@ jobs:
         id: gitversion
         shell: bash
         run: |
-          VERSION=$(dotnet gitversion /output json /showvariable NuGetVersionV2)
+          VERSION=$(dotnet gitversion /output json /showvariable SemVer)
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Restore dependencies
