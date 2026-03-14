@@ -261,7 +261,10 @@ function rewriteAnchorHref(anchor) {
 }
 
 function tryCreateAnchorAbsoluteHrefUrl(anchor) {
-    const href = anchor.getAttribute("href");
+    const authoredHref = typeof anchor.getAttribute === "function"
+        ? anchor.getAttribute("href")
+        : null;
+    const href = authoredHref || anchor.href;
     if (!href) {
         return null;
     }

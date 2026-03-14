@@ -125,6 +125,19 @@ namespace Blazor.HashRouting.Test
         }
 
         [Fact]
+        public void GIVEN_InternalAnchorWithDotSlashHrefAndRootLocation_WHEN_InitializeCalled_THEN_AnchorHrefIsCanonicalizedToHashRoute()
+        {
+            var anchorIndex = _target.AppendAnchor("./app-settings");
+
+            _target.Initialize(
+                "http://localhost/",
+                "http://localhost",
+                "http://localhost/");
+
+            _target.GetAnchorHref(anchorIndex).Should().Be("http://localhost/#/app-settings");
+        }
+
+        [Fact]
         public void GIVEN_InternalAnchorAddedAfterInitialization_WHEN_AnchorObserved_THEN_AnchorHrefIsCanonicalizedToHashRoute()
         {
             _target.Initialize(
