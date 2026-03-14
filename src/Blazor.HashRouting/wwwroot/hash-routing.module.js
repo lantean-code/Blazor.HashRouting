@@ -19,6 +19,7 @@ const hashRoutingState = {
     clickHandler: null,
     hashChangeHandler: null,
     popStateHandler: null,
+    anchorMutationObserver: null,
     processingBrowserNavigation: false,
     lastProcessedBrowserNavigationKey: "",
 };
@@ -37,6 +38,7 @@ export function initialize(dotNetObjectReference, options, baseUri, currentPathU
 
     if (!hashRoutingState.initialized) {
         attachHandlers();
+        startAnchorMonitoring();
         hashRoutingState.initialized = true;
     }
 
@@ -106,6 +108,10 @@ export function dispose() {
     hashRoutingState.clickHandler = null;
     hashRoutingState.hashChangeHandler = null;
     hashRoutingState.popStateHandler = null;
+    if (hashRoutingState.anchorMutationObserver) {
+        hashRoutingState.anchorMutationObserver.disconnect();
+    }
+    hashRoutingState.anchorMutationObserver = null;
     hashRoutingState.lastProcessedBrowserNavigationKey = "";
 }
 
@@ -164,6 +170,97 @@ function attachHandlers() {
     document.addEventListener("click", hashRoutingState.clickHandler, true);
     window.addEventListener("hashchange", hashRoutingState.hashChangeHandler);
     window.addEventListener("popstate", hashRoutingState.popStateHandler);
+}
+
+function startAnchorMonitoring() {
+    rewriteInternalAnchors();
+
+    if (typeof MutationObserver !== "function") {
+        return;
+    }
+
+    const observationTarget = document.body || document.documentElement || document;
+    hashRoutingState.anchorMutationObserver = new MutationObserver(function (mutations) {
+        for (const mutation of mutations) {
+            if (mutation.type === "attributes") {
+                rewriteAnchorsForNode(mutation.target);
+                continue;
+            }
+
+            if (!mutation.addedNodes) {
+                continue;
+            }
+
+            for (const addedNode of mutation.addedNodes) {
+                rewriteAnchorsForNode(addedNode);
+            }
+        }
+    });
+
+    hashRoutingState.anchorMutationObserver.observe(observationTarget, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["href"],
+    });
+}
+
+function rewriteInternalAnchors() {
+    if (typeof document.querySelectorAll !== "function") {
+        return;
+    }
+
+    for (const anchor of document.querySelectorAll("a[href]")) {
+        rewriteAnchorHref(anchor);
+    }
+}
+
+function rewriteAnchorsForNode(node) {
+    if (!(node instanceof Element)) {
+        return;
+    }
+
+    if (typeof node.matches === "function" && node.matches("a[href]")) {
+        rewriteAnchorHref(node);
+    }
+
+    if (typeof node.querySelectorAll !== "function") {
+        return;
+    }
+
+    for (const anchor of node.querySelectorAll("a[href]")) {
+        rewriteAnchorHref(anchor);
+    }
+}
+
+function rewriteAnchorHref(anchor) {
+    if (!hashRoutingState.options.interceptInternalLinks || anchor.hasAttribute("download")) {
+        return;
+    }
+
+    let absoluteHrefUrl;
+    try {
+        absoluteHrefUrl = new URL(anchor.href, hashRoutingState.baseUri || document.baseURI);
+    } catch {
+        return;
+    }
+
+    if (!isCanonicalizableHash(absoluteHrefUrl.hash, hashRoutingState.normalizedHashPrefix)) {
+        return;
+    }
+
+    if (!isWithinBaseUriSpace(absoluteHrefUrl)) {
+        return;
+    }
+
+    const pathAbsoluteUri = toPathAbsoluteUriFromAbsolute(absoluteHrefUrl, hashRoutingState.baseUri, hashRoutingState.normalizedHashPrefix);
+    const hashAbsoluteUri = toHashAbsoluteUri(pathAbsoluteUri, hashRoutingState.baseUri, hashRoutingState.normalizedHashPrefix);
+
+    if (sameUri(absoluteHrefUrl.href, hashAbsoluteUri)) {
+        return;
+    }
+
+    anchor.setAttribute("href", hashAbsoluteUri);
 }
 
 async function processBrowserNavigation(rawLocation, interceptedLink) {

@@ -98,6 +98,51 @@ namespace Blazor.HashRouting.Test
             _target.GetLastReplacedHref().Should().Be("https://example.com/path?query=value");
         }
 
+        [Fact]
+        public void GIVEN_InternalAnchorPresentBeforeInitialization_WHEN_InitializeCalled_THEN_AnchorHrefIsCanonicalizedToHashRoute()
+        {
+            var anchorIndex = _target.AppendAnchor("details/ABC?tab=Peers");
+
+            _target.Initialize(
+                "http://localhost/",
+                "http://localhost/#/",
+                "http://localhost/");
+
+            _target.GetAnchorHref(anchorIndex).Should().Be("http://localhost/#/details/ABC?tab=Peers");
+        }
+
+        [Fact]
+        public void GIVEN_InternalAnchorAddedAfterInitialization_WHEN_AnchorObserved_THEN_AnchorHrefIsCanonicalizedToHashRoute()
+        {
+            _target.Initialize(
+                "http://localhost/proxy/app/",
+                "http://localhost/proxy/app/#/",
+                "http://localhost/proxy/app/");
+
+            var anchorIndex = _target.AppendAnchor("settings");
+
+            _target.GetAnchorHref(anchorIndex).Should().Be("http://localhost/proxy/app/#/settings");
+        }
+
+        [Fact]
+        public void GIVEN_InternalAnchor_WHEN_InitializeCalledWithLinkInterceptionDisabled_THEN_AnchorHrefRemainsPathRoute()
+        {
+            var anchorIndex = _target.AppendAnchor("settings");
+
+            _target.Initialize(
+                "http://localhost/",
+                "http://localhost/#/",
+                "http://localhost/",
+                new
+                {
+                    canonicalizeToHash = true,
+                    hashPrefix = "/",
+                    interceptInternalLinks = false
+                });
+
+            _target.GetAnchorHref(anchorIndex).Should().Be("http://localhost/settings");
+        }
+
         private sealed class HashRoutingJavaScriptTestHost
         {
             private readonly Engine _engine;
@@ -129,6 +174,20 @@ namespace Blazor.HashRouting.Test
             public string GetLocationHref()
             {
                 return _engine.Invoke("__getLocationHref").AsString();
+            }
+
+            public int AppendAnchor(string href, string? target = null, bool download = false)
+            {
+                var targetValue = target is null
+                    ? JsValue.Null
+                    : JsValue.FromObject(_engine, target);
+
+                return (int)_engine.Invoke("__appendAnchor", href, targetValue, download).AsNumber();
+            }
+
+            public string GetAnchorHref(int index)
+            {
+                return _engine.Invoke("__getAnchorHref", index).AsString();
             }
 
             public string Initialize(string baseUri, string locationHref, string currentPathUri, object? options = null)
@@ -229,6 +288,86 @@ function URL(raw, base) {
 function Element() {
 }
 
+Element.prototype.closest = function(selector) {
+    return this.matches(selector) ? this : null;
+};
+
+Element.prototype.matches = function() {
+    return false;
+};
+
+Element.prototype.querySelectorAll = function() {
+    return [];
+};
+
+function AnchorElement(href, target, download) {
+    this._attributes = {};
+
+    if (href !== null && href !== undefined) {
+        this._attributes.href = String(href);
+    }
+
+    if (target !== null && target !== undefined) {
+        this._attributes.target = String(target);
+    }
+
+    if (download) {
+        this._attributes.download = "";
+    }
+}
+
+AnchorElement.prototype = Object.create(Element.prototype);
+AnchorElement.prototype.constructor = AnchorElement;
+
+AnchorElement.prototype.getAttribute = function(name) {
+    return Object.prototype.hasOwnProperty.call(this._attributes, name)
+        ? this._attributes[name]
+        : null;
+};
+
+AnchorElement.prototype.setAttribute = function(name, value) {
+    this._attributes[name] = String(value);
+
+    if (document._mutationObserver && name === "href") {
+        document._mutationObserver._callback([{
+            type: "attributes",
+            target: this,
+            attributeName: "href"
+        }]);
+    }
+};
+
+AnchorElement.prototype.hasAttribute = function(name) {
+    return Object.prototype.hasOwnProperty.call(this._attributes, name);
+};
+
+AnchorElement.prototype.matches = function(selector) {
+    return selector === "a[href]" && this.hasAttribute("href");
+};
+
+Object.defineProperty(AnchorElement.prototype, "href", {
+    get: function() {
+        return new URL(this.getAttribute("href") || "", document.baseURI).href;
+    },
+    set: function(value) {
+        this.setAttribute("href", value);
+    }
+});
+
+function MutationObserver(callback) {
+    this._callback = callback;
+}
+
+MutationObserver.prototype.observe = function() {
+    document._mutationObserver = this;
+};
+
+MutationObserver.prototype.disconnect = function() {
+    if (document._mutationObserver === this) {
+        document._mutationObserver = null;
+    }
+};
+
 const dotNetObjectReference = {
     invokeMethodAsync: function() {
         return null;
@@ -238,13 +377,27 @@ const dotNetObjectReference = {
 const document = {
     baseURI: "http://localhost/",
     _events: {},
+    _anchors: [],
+    _mutationObserver: null,
     addEventListener: function(name, handler) {
         this._events[name] = handler;
     },
     removeEventListener: function(name) {
         delete this._events[name];
+    },
+    querySelectorAll: function(selector) {
+        if (selector !== "a[href]") {
+            return [];
+        }
+
+        return this._anchors.filter(function(anchor) {
+            return anchor.matches(selector);
+        });
     }
 };
+
+document.body = document;
+document.documentElement = document;
 
 const window = {
     _events: {},
@@ -293,6 +446,25 @@ function __getLocationHref() {
 
 function __setDocumentBaseUri(value) {
     document.baseURI = value;
+}
+
+function __appendAnchor(href, target, download) {
+    const anchor = new AnchorElement(href, target, Boolean(download));
+    document._anchors.push(anchor);
+
+    if (document._mutationObserver) {
+        document._mutationObserver._callback([{
+            type: "childList",
+            target: document.body,
+            addedNodes: [anchor]
+        }]);
+    }
+
+    return document._anchors.length - 1;
+}
+
+function __getAnchorHref(index) {
+    return document._anchors[index].href;
 }
 
 function __setLocationAndHistory(href, historyIndex, userState) {
