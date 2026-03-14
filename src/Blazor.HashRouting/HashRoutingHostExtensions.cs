@@ -1,8 +1,9 @@
 using Blazor.HashRouting;
+using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
+using System.Diagnostics.CodeAnalysis;
 
-namespace Microsoft.Extensions.Hosting
+namespace Microsoft.AspNetCore.Components.WebAssembly.Hosting
 {
     /// <summary>
     /// Host initialization extensions for hash routing.
@@ -15,7 +16,8 @@ namespace Microsoft.Extensions.Hosting
         /// <param name="host">The application host.</param>
         /// <param name="cancellationToken">A cancellation token.</param>
         /// <returns>A task representing the asynchronous initialization operation.</returns>
-        public static Task InitializeHashRoutingAsync(this IHost host, CancellationToken cancellationToken = default)
+        [ExcludeFromCodeCoverage]
+        public static Task InitializeHashRoutingAsync(this WebAssemblyHost host, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(host);
 
@@ -24,14 +26,14 @@ namespace Microsoft.Extensions.Hosting
                 throw new PlatformNotSupportedException("Blazor.HashRouting supports browser-hosted Blazor WebAssembly applications only.");
             }
 
-            return InitializeHashRoutingCoreAsync(host, cancellationToken);
+            return InitializeHashRoutingCoreAsync(host.Services, cancellationToken);
         }
 
-        internal static Task InitializeHashRoutingCoreAsync(this IHost host, CancellationToken cancellationToken = default)
+        internal static Task InitializeHashRoutingCoreAsync(this IServiceProvider serviceProvider, CancellationToken cancellationToken = default)
         {
-            ArgumentNullException.ThrowIfNull(host);
+            ArgumentNullException.ThrowIfNull(serviceProvider);
 
-            var navigationManager = host.Services.GetRequiredService<HashNavigationManager>();
+            var navigationManager = serviceProvider.GetRequiredService<HashNavigationManager>();
 
             return navigationManager.InitializeAsync(cancellationToken);
         }

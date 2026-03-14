@@ -1,7 +1,8 @@
 using AwesomeAssertions;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.JSInterop;
 using Moq;
@@ -13,7 +14,7 @@ namespace Blazor.HashRouting.Test
         [Fact]
         public void GIVEN_NullHost_WHEN_InitializeHashRoutingAsyncCalled_THEN_ThrowsArgumentNullException()
         {
-            IHost? host = null;
+            WebAssemblyHost? host = null;
 
             Action action = () =>
             {
@@ -24,42 +25,28 @@ namespace Blazor.HashRouting.Test
         }
 
         [Fact]
-        public async Task GIVEN_NonBrowserRuntime_WHEN_InitializeHashRoutingAsyncCalled_THEN_ThrowsPlatformNotSupportedException()
+        public async Task GIVEN_NullServiceProvider_WHEN_InitializeHashRoutingCoreAsyncCalled_THEN_ThrowsArgumentNullException()
         {
-            if (OperatingSystem.IsBrowser())
-            {
-                return;
-            }
-
-            var target = CreateHost(CreateServiceProvider());
+            IServiceProvider? serviceProvider = null;
 
             Func<Task> action = async () =>
             {
-                await target.InitializeHashRoutingAsync(Xunit.TestContext.Current.CancellationToken);
+                await serviceProvider!.InitializeHashRoutingCoreAsync(Xunit.TestContext.Current.CancellationToken);
             };
 
-            await action.Should().ThrowAsync<PlatformNotSupportedException>();
+            await action.Should().ThrowAsync<ArgumentNullException>();
         }
 
         [Fact]
-        public async Task GIVEN_Host_WHEN_InitializeHashRoutingAsyncCalled_THEN_InitializesNavigationManager()
+        public async Task GIVEN_ServiceProvider_WHEN_InitializeHashRoutingCoreAsyncCalled_THEN_InitializesNavigationManager()
         {
             var runtime = new RecordingJSRuntime();
             var serviceProvider = CreateServiceProvider(runtime);
-            var target = CreateHost(serviceProvider);
 
-            await target.InitializeHashRoutingCoreAsync(Xunit.TestContext.Current.CancellationToken);
+            await serviceProvider.InitializeHashRoutingCoreAsync(Xunit.TestContext.Current.CancellationToken);
 
             runtime.ImportCalls.Should().ContainSingle();
             runtime.Module.Calls.Should().Contain(call => call.Identifier == "initialize");
-        }
-
-        private static IHost CreateHost(IServiceProvider serviceProvider)
-        {
-            var host = new Mock<IHost>();
-            host.SetupGet(value => value.Services).Returns(serviceProvider);
-
-            return host.Object;
         }
 
         private static IServiceProvider CreateServiceProvider(IJSRuntime? runtime = null)
@@ -67,7 +54,7 @@ namespace Blazor.HashRouting.Test
             var services = new ServiceCollection();
             services.AddSingleton<NavigationManager>(new TestNavigationManager("http://localhost/", "http://localhost/"));
             services.AddSingleton(runtime ?? Mock.Of<IJSRuntime>());
-            services.AddSingleton(typeof(Microsoft.Extensions.Logging.ILogger<HashNavigationManager>), NullLogger<HashNavigationManager>.Instance);
+            services.AddSingleton<ILogger<HashNavigationManager>>(NullLogger<HashNavigationManager>.Instance);
             services.AddHashRoutingCore();
 
             return services.BuildServiceProvider();

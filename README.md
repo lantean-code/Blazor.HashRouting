@@ -16,7 +16,7 @@ Register hash routing during startup:
 
 ```csharp
 using Blazor.HashRouting;
-using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 
