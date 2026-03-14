@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
 
     steps:
       - name: Checkout code
@@ -53,7 +54,7 @@ jobs:
             echo "label=Release" >> $GITHUB_OUTPUT
           elif [[ "${GITHUB_REF}" == refs/heads/release/* || "${GITHUB_REF}" == refs/heads/hotfix/* ]]; then
             echo "channel=rc" >> $GITHUB_OUTPUT
-            echo "prerelease=false" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
             echo "draft=true" >> $GITHUB_OUTPUT
             echo "label=RC" >> $GITHUB_OUTPUT
           elif [ "${GITHUB_REF}" = "refs/heads/develop" ]; then
@@ -79,6 +80,24 @@ jobs:
         run: |
           echo "::error::Releases are only supported from master, develop, feature/*, release/*, and hotfix/* branches."
           exit 1
+
+      - name: Validate NuGet version channel
+        if: steps.release_channel.outputs.channel != 'none'
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF}" = "refs/heads/master" ]; then
+            if [[ "${VERSION}" == *-* ]]; then
+              echo "::error::Master releases must produce a stable NuGet version, but GitVersion returned '${VERSION}'."
+              exit 1
+            fi
+
+            exit 0
+          fi
+
+          if [[ "${VERSION}" != *-* ]]; then
+            echo "::error::Non-master releases must produce a prerelease NuGet version, but GitVersion returned '${VERSION}'."
+            exit 1
+          fi
 
       - name: Restore dependencies
         run: dotnet restore --artifacts-path=/tmp/artifacts/blazor-hashrouting
@@ -191,8 +210,17 @@ jobs:
               "${release_args[@]}"
           fi
 
-      - name: Push package to NuGet
+      - name: Push package to GitHub Packages
         if: steps.release_channel.outputs.channel != 'none'
+        shell: bash
+        run: |
+          dotnet nuget push "/tmp/artifacts/blazor-hashrouting/package/release/Blazor.HashRouting.${VERSION}.nupkg" \
+            --api-key "${{ secrets.GITHUB_TOKEN }}" \
+            --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+            --skip-duplicate
+
+      - name: Push package to NuGet
+        if: steps.release_channel.outputs.channel == 'stable'
         shell: bash
         run: |
           dotnet nuget push "/tmp/artifacts/blazor-hashrouting/package/release/Blazor.HashRouting.${VERSION}.nupkg" \
@@ -201,7 +229,7 @@ jobs:
             --skip-duplicate
 
       - name: Push symbols to NuGet
-        if: steps.release_channel.outputs.channel != 'none'
+        if: steps.release_channel.outputs.channel == 'stable'
         shell: bash
         run: |
           dotnet nuget push "/tmp/artifacts/blazor-hashrouting/package/release/Blazor.HashRouting.${VERSION}.snupkg" \

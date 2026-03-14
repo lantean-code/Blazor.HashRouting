@@ -38,8 +38,14 @@ builder.Services.AddHashRouting(options =>
 ## URL shape
 
 - Root route: `/#/`
-- Nested route: `/#/settings`
-- Base-path route: `/proxy/app/#/settings`
+- Nested route: `/#/foo`
+- Base-path route: `/proxy/app/#/foo`
+
+## Relative links
+
+Relative anchor `href` values such as `./bar` are resolved relative to the application base URI, not the current hash route.
+
+For example, from `/#/foo`, an anchor with `href="./bar"` canonicalizes to `/#/bar`, not `/#/foo/bar`.
 
 ## Supported environments
 

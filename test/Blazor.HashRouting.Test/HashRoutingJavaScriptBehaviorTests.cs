@@ -112,6 +112,19 @@ namespace Blazor.HashRouting.Test
         }
 
         [Fact]
+        public void GIVEN_InternalAnchorWithDotSlashHref_WHEN_InitializeCalled_THEN_AnchorHrefIsCanonicalizedToHashRoute()
+        {
+            var anchorIndex = _target.AppendAnchor("./tags");
+
+            _target.Initialize(
+                "http://localhost/",
+                "http://localhost/#/cookies",
+                "http://localhost/cookies");
+
+            _target.GetAnchorHref(anchorIndex).Should().Be("http://localhost/#/tags");
+        }
+
+        [Fact]
         public void GIVEN_InternalAnchorAddedAfterInitialization_WHEN_AnchorObserved_THEN_AnchorHrefIsCanonicalizedToHashRoute()
         {
             _target.Initialize(
@@ -139,6 +152,19 @@ namespace Blazor.HashRouting.Test
                     hashPrefix = "/",
                     interceptInternalLinks = false
                 });
+
+            _target.GetAnchorHref(anchorIndex).Should().Be("http://localhost/settings");
+        }
+
+        [Fact]
+        public void GIVEN_InternalAnchorWithNonSelfTarget_WHEN_InitializeCalled_THEN_AnchorHrefRemainsPathRoute()
+        {
+            var anchorIndex = _target.AppendAnchor("settings", "_blank");
+
+            _target.Initialize(
+                "http://localhost/",
+                "http://localhost/#/",
+                "http://localhost/");
 
             _target.GetAnchorHref(anchorIndex).Should().Be("http://localhost/settings");
         }

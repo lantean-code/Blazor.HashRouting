@@ -139,10 +139,8 @@ function attachHandlers() {
             return;
         }
 
-        let absoluteHrefUrl;
-        try {
-            absoluteHrefUrl = new URL(anchor.href, hashRoutingState.baseUri || document.baseURI);
-        } catch {
+        const absoluteHrefUrl = tryCreateAnchorAbsoluteHrefUrl(anchor);
+        if (!absoluteHrefUrl) {
             return;
         }
 
@@ -234,14 +232,13 @@ function rewriteAnchorsForNode(node) {
 }
 
 function rewriteAnchorHref(anchor) {
-    if (!hashRoutingState.options.interceptInternalLinks || anchor.hasAttribute("download")) {
+    const target = anchor.getAttribute("target");
+    if (!hashRoutingState.options.interceptInternalLinks || anchor.hasAttribute("download") || (target && target !== "_self")) {
         return;
     }
 
-    let absoluteHrefUrl;
-    try {
-        absoluteHrefUrl = new URL(anchor.href, hashRoutingState.baseUri || document.baseURI);
-    } catch {
+    const absoluteHrefUrl = tryCreateAnchorAbsoluteHrefUrl(anchor);
+    if (!absoluteHrefUrl) {
         return;
     }
 
@@ -261,6 +258,19 @@ function rewriteAnchorHref(anchor) {
     }
 
     anchor.setAttribute("href", hashAbsoluteUri);
+}
+
+function tryCreateAnchorAbsoluteHrefUrl(anchor) {
+    const href = anchor.getAttribute("href");
+    if (!href) {
+        return null;
+    }
+
+    try {
+        return new URL(href, hashRoutingState.baseUri || document.baseURI);
+    } catch {
+        return null;
+    }
 }
 
 async function processBrowserNavigation(rawLocation, interceptedLink) {
