@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
 using Blazor.HashRouting;
 using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
@@ -50,7 +49,6 @@ namespace Microsoft.Extensions.DependencyInjection
                 // Keep AddHashRouting idempotent while allowing the latest options registration to win.
                 services.RemoveAll<HashRoutingOptions>();
                 services.AddSingleton(options);
-                services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, HashRoutingHostedService>());
                 return services;
             }
 
@@ -86,7 +84,6 @@ namespace Microsoft.Extensions.DependencyInjection
                 return (HashNavigationManager)serviceProvider.GetRequiredService<NavigationManager>();
             });
             services.AddSingleton<HashRoutingRegistrationMarker>();
-            services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, HashRoutingHostedService>());
 
             return services;
         }

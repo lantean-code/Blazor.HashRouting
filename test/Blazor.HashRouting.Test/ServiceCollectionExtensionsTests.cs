@@ -1,7 +1,6 @@
 using AwesomeAssertions;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.JSInterop;
 using Moq;
@@ -56,18 +55,6 @@ namespace Blazor.HashRouting.Test
         }
 
         [Fact]
-        public void GIVEN_ServiceCollection_WHEN_AddHashRouting_THEN_RegistersHashRoutingHostedService()
-        {
-            var services = CreateServiceCollection();
-            AddHashRoutingForTest(services);
-
-            var serviceProvider = services.BuildServiceProvider();
-            var hostedServices = serviceProvider.GetServices<IHostedService>();
-
-            hostedServices.Should().ContainSingle(service => service.GetType() == typeof(HashRoutingHostedService));
-        }
-
-        [Fact]
         public void GIVEN_FactoryNavigationManagerRegistration_WHEN_AddHashRouting_THEN_RegistersHashNavigationManager()
         {
             var services = CreateServiceCollectionWithFactoryNavigationManager();
@@ -112,11 +99,9 @@ namespace Blazor.HashRouting.Test
             var serviceProvider = services.BuildServiceProvider();
             var navigationManager = serviceProvider.GetRequiredService<NavigationManager>();
             var options = serviceProvider.GetRequiredService<HashRoutingOptions>();
-            var hostedServices = serviceProvider.GetServices<IHostedService>();
 
             navigationManager.Should().BeOfType<HashNavigationManager>();
             options.HashPrefix.Should().Be("/new-prefix/");
-            hostedServices.Where(service => service.GetType() == typeof(HashRoutingHostedService)).Should().ContainSingle();
         }
 
         [Fact]

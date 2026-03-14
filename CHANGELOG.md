@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- Initial standalone release preparation.
-- Prepared the package for independent build, test, and NuGet packaging.
+- Replaced hosted-service startup with explicit `InitializeHashRoutingAsync()` host initialization.
+- Canonicalized internal anchor `href` values to hash-route URLs for browser-managed navigation.
+- Clarified that relative anchor URLs such as `./foo` resolve relative to the application base URI.
 
 ## 1.0.0-rc.1
 

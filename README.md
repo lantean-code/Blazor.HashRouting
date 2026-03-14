@@ -16,13 +16,18 @@ Register hash routing during startup:
 
 ```csharp
 using Blazor.HashRouting;
+using Microsoft.Extensions.Hosting;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 
 builder.Services.AddHashRouting();
 
-await builder.Build().RunAsync();
+var host = builder.Build();
+await host.InitializeHashRoutingAsync();
+await host.RunAsync();
 ```
+
+Call `InitializeHashRoutingAsync()` after `Build()` and before `RunAsync()`.
 
 Optional configuration:
 
