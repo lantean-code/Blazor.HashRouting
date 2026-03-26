@@ -99,6 +99,18 @@ namespace Blazor.HashRouting.Test
         }
 
         [Fact]
+        public void GIVEN_InternalForceLoad_WHEN_ForceLoadCalled_THEN_UpdatesLocationAndReloadsDocument()
+        {
+            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
+
+            _target.ForceLoad("http://localhost/#/settings", false);
+
+            _target.GetLocationHref().Should().Be("http://localhost/#/settings");
+            _target.GetLastReloadedHref().Should().Be("http://localhost/#/settings");
+            _target.GetReloadCount().Should().Be(1);
+        }
+
+        [Fact]
         public void GIVEN_InternalAnchorPresentBeforeInitialization_WHEN_InitializeCalled_THEN_AnchorHrefIsCanonicalizedToHashRoute()
         {
             var anchorIndex = _target.AppendAnchor("details/ABC?tab=Peers");
@@ -210,9 +222,19 @@ namespace Blazor.HashRouting.Test
                 return _engine.Invoke("__getLastReplacedHref").AsString();
             }
 
+            public string GetLastReloadedHref()
+            {
+                return _engine.Invoke("__getLastReloadedHref").AsString();
+            }
+
             public string GetLocationHref()
             {
                 return _engine.Invoke("__getLocationHref").AsString();
+            }
+
+            public int GetReloadCount()
+            {
+                return (int)_engine.Invoke("__getReloadCount").AsNumber();
             }
 
             public int AppendAnchor(string href, string? target = null, bool download = false)
@@ -247,6 +269,11 @@ namespace Blazor.HashRouting.Test
             public void NavigateExternally(string uri, bool replaceHistoryEntry)
             {
                 _engine.Invoke("navigateExternally", uri, replaceHistoryEntry);
+            }
+
+            public void ForceLoad(string uri, bool replaceHistoryEntry)
+            {
+                _engine.Invoke("forceLoad", uri, replaceHistoryEntry);
             }
 
             public void NavigateTo(string pathAbsoluteUri, bool replaceHistoryEntry, string? historyEntryState)
@@ -441,6 +468,8 @@ document.documentElement = document;
 const window = {
     _events: {},
     _lastReplacedHref: "",
+    _lastReloadedHref: "",
+    _reloadCount: 0,
     location: {
         href: "http://localhost/#/",
         hash: "#/",
@@ -448,6 +477,10 @@ const window = {
             window._lastReplacedHref = String(uri);
             this.href = new URL(uri, this.href).href;
             __syncLocation();
+        },
+        reload: function() {
+            window._lastReloadedHref = this.href;
+            window._reloadCount++;
         }
     },
     history: {
@@ -479,8 +512,16 @@ function __getLastReplacedHref() {
     return window._lastReplacedHref;
 }
 
+function __getLastReloadedHref() {
+    return window._lastReloadedHref;
+}
+
 function __getLocationHref() {
     return window.location.href;
+}
+
+function __getReloadCount() {
+    return window._reloadCount;
 }
 
 function __setDocumentBaseUri(value) {
@@ -508,6 +549,8 @@ function __getAnchorHref(index) {
 
 function __setLocationAndHistory(href, historyIndex, userState) {
     window._lastReplacedHref = "";
+    window._lastReloadedHref = "";
+    window._reloadCount = 0;
     window.location.href = href;
     if (historyIndex === null || historyIndex === undefined) {
         window.history.state = null;

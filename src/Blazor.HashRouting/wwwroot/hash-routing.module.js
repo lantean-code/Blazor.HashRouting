@@ -76,6 +76,16 @@ export function navigateExternally(uri, replaceHistoryEntry) {
     window.location.href = uri;
 }
 
+export function forceLoad(uri, replaceHistoryEntry) {
+    if (replaceHistoryEntry) {
+        window.history.replaceState(window.history.state, "", uri);
+    } else {
+        window.history.pushState(window.history.state, "", uri);
+    }
+
+    window.location.reload();
+}
+
 export function setNavigationLockState(value) {
     hashRoutingState.navigationLockEnabled = Boolean(value);
 }

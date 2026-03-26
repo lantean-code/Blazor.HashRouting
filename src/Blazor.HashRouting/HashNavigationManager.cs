@@ -234,15 +234,15 @@ namespace Blazor.HashRouting
 
                 if (options.ForceLoad || !isInBaseUriSpace)
                 {
-                    var externalNavigationUri = options.ForceLoad
-                        ? isInBaseUriSpace
-                            ? hashTargetAbsoluteUri
-                            : targetAbsoluteUri
-                        : targetAbsoluteUri;
-
                     var externalNavigationModule = await GetModule();
 
-                    await externalNavigationModule.InvokeVoidAsync("navigateExternally", externalNavigationUri, options.ReplaceHistoryEntry);
+                    if (options.ForceLoad && isInBaseUriSpace)
+                    {
+                        await externalNavigationModule.InvokeVoidAsync("forceLoad", hashTargetAbsoluteUri, options.ReplaceHistoryEntry);
+                        return;
+                    }
+
+                    await externalNavigationModule.InvokeVoidAsync("navigateExternally", targetAbsoluteUri, options.ReplaceHistoryEntry);
                     return;
                 }
 

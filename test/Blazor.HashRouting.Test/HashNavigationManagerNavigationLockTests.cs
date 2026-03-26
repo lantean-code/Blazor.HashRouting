@@ -153,18 +153,21 @@ namespace Blazor.HashRouting.Test
         }
 
         [Fact]
-        public async Task GIVEN_ForceLoadNavigation_WHEN_NavigateToCalled_THEN_DelegatesToJsExternalNavigation()
+        public async Task GIVEN_ForceLoadNavigation_WHEN_NavigateToCalled_THEN_DelegatesToJsForceLoad()
         {
             await _target.InitializeAsync(Xunit.TestContext.Current.CancellationToken);
 
             _target.NavigateTo("/settings", forceLoad: true);
 
-            await WaitForAsync(() => _jSRuntime.Module.Calls.Count(call => call.Identifier == "navigateExternally") == 1);
-            _jSRuntime.Module.Calls.Single(call => call.Identifier == "navigateExternally").Arguments[0].Should().Be("http://localhost/#/settings");
+            await WaitForAsync(() => _jSRuntime.Module.Calls.Count(call => call.Identifier == "forceLoad") == 1);
+            var call = _jSRuntime.Module.Calls.Single(record => record.Identifier == "forceLoad");
+
+            call.Arguments[0].Should().Be("http://localhost/#/settings");
+            call.Arguments[1].Should().Be(false);
         }
 
         [Fact]
-        public async Task GIVEN_ForceLoadNavigationWithinBasePath_WHEN_NavigateToCalled_THEN_DelegatesToCanonicalHashExternalNavigation()
+        public async Task GIVEN_ForceLoadNavigationWithinBasePath_WHEN_NavigateToCalled_THEN_DelegatesToCanonicalHashForceLoad()
         {
             var basePathJsRuntime = new RecordingJSRuntime();
             var manager = new HashNavigationManager(
@@ -178,8 +181,11 @@ namespace Blazor.HashRouting.Test
 
             manager.NavigateTo("settings", forceLoad: true);
 
-            await WaitForAsync(() => basePathJsRuntime.Module.Calls.Count(call => call.Identifier == "navigateExternally") == 1);
-            basePathJsRuntime.Module.Calls.Single(call => call.Identifier == "navigateExternally").Arguments[0].Should().Be("http://localhost/proxy/app/#/settings");
+            await WaitForAsync(() => basePathJsRuntime.Module.Calls.Count(call => call.Identifier == "forceLoad") == 1);
+            var call = basePathJsRuntime.Module.Calls.Single(record => record.Identifier == "forceLoad");
+
+            call.Arguments[0].Should().Be("http://localhost/proxy/app/#/settings");
+            call.Arguments[1].Should().Be(false);
         }
 
         [Fact]

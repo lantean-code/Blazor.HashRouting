@@ -2,11 +2,15 @@
 
 ## Unreleased
 
+- Fixed internal `forceLoad: true` navigation so hash-routed destinations perform a real document reload while preserving the canonical hash URL.
+
+## 1.1.0
+
 - Replaced hosted-service startup with explicit `InitializeHashRoutingAsync()` host initialization.
 - Canonicalized internal anchor `href` values to hash-route URLs for browser-managed navigation.
 - Clarified that relative anchor URLs such as `./foo` resolve relative to the application base URI.
 
-## 1.0.0-rc.1
+## 1.0.0
 
 - First release candidate of `Blazor.HashRouting`.
 - Added reusable hash-fragment routing for browser-hosted Blazor WebAssembly applications.
