@@ -301,6 +301,44 @@ namespace Blazor.HashRouting.Test
             });
         }
 
+        [Fact]
+        public void GIVEN_HistoryGoThrowsDuringSuppressedNavigation_WHEN_BrowserNavigationAllowed_THEN_NavigationStillCompletes()
+        {
+            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
+            _target.NavigateTo("http://localhost/first", false, "first");
+            _target.NavigateTo("http://localhost/second", false, "second");
+            _target.SetNavigationLockState(true);
+            _target.EnqueueLocationChangingResult(true);
+            _target.ThrowSuppressedHistoryGo();
+
+            _target.HistoryGo(-1);
+            _target.ProcessTasks();
+
+            _target.GetLocationHref().Should().Be("http://localhost/#/first");
+            _target.GetLocationChangedCalls().Should().ContainSingle().Which.Location.Should().Be("http://localhost/first");
+        }
+
+        [Fact]
+        public void GIVEN_HistoryGoIsIgnoredDuringSuppressedNavigation_WHEN_TimeoutRuns_THEN_NextBrowserNavigationIsNotSuppressed()
+        {
+            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
+            _target.NavigateTo("http://localhost/first", false, "first");
+            _target.NavigateTo("http://localhost/second", false, "second");
+            _target.SetNavigationLockState(true);
+            _target.EnqueueLocationChangingResult(true);
+            _target.IgnoreSuppressedHistoryGo();
+
+            _target.HistoryGo(-1);
+            _target.ProcessTasks();
+
+            _target.GetLocationChangedCalls().Should().ContainSingle().Which.Location.Should().Be("http://localhost/first");
+
+            _target.HistoryGo(1);
+            _target.ProcessTasks();
+
+            _target.GetLocationChangedCalls().Last().Location.Should().Be("http://localhost/second");
+        }
+
         private sealed class HashRoutingJavaScriptTestHost
         {
             private readonly Engine _engine;
@@ -442,10 +480,21 @@ namespace Blazor.HashRouting.Test
                 _engine.Invoke("__hashChangeTo", href, historyIndex, userState ?? JsValue.Null);
             }
 
+            public void ThrowSuppressedHistoryGo()
+            {
+                _engine.Invoke("__throwHistoryGoAfter", 1);
+            }
+
+            public void IgnoreSuppressedHistoryGo()
+            {
+                _engine.Invoke("__ignoreHistoryGoAfter", 1);
+            }
+
             public void ProcessTasks()
             {
                 for (var index = 0; index < 20; index++)
                 {
+                    _engine.Invoke("__runTimers");
                     _engine.Advanced.ProcessTasks();
                 }
             }
@@ -654,6 +703,28 @@ const dotNetObjectReference = {
     }
 };
 
+let nextTimerId = 0;
+let timers = [];
+
+function setTimeout(callback) {
+    const timer = {
+        id: ++nextTimerId,
+        callback: callback,
+        active: true
+    };
+    timers.push(timer);
+
+    return timer.id;
+}
+
+function clearTimeout(timerId) {
+    for (const timer of timers) {
+        if (timer.id === timerId) {
+            timer.active = false;
+        }
+    }
+}
+
 const document = {
     baseURI: "http://localhost/",
     _events: {},
@@ -684,6 +755,8 @@ const window = {
     _lastReplacedHref: "",
     _lastReloadedHref: "",
     _reloadCount: 0,
+    _throwHistoryGoAfter: null,
+    _ignoreHistoryGoAfter: null,
     location: {
         href: "http://localhost/#/",
         hash: "#/",
@@ -732,6 +805,25 @@ const window = {
             __syncLocation();
         },
         go: function(delta) {
+            if (window._throwHistoryGoAfter !== null) {
+                if (window._throwHistoryGoAfter <= 0) {
+                    window._throwHistoryGoAfter = null;
+                    throw new Error("history.go failed");
+                }
+
+                window._throwHistoryGoAfter--;
+            }
+
+            if (window._ignoreHistoryGoAfter !== null) {
+                if (window._ignoreHistoryGoAfter <= 0) {
+                    window._ignoreHistoryGoAfter = null;
+                    __runTimers();
+                    return;
+                }
+
+                window._ignoreHistoryGoAfter--;
+            }
+
             const nextIndex = this._entryIndex + Number(delta);
             if (nextIndex < 0 || nextIndex >= this._entries.length) {
                 return;
@@ -743,15 +835,13 @@ const window = {
             this.state = entry.state;
             window.location.href = entry.href;
             __syncLocation();
-            const popStateResult = __dispatchWindowEvent("popstate", {
+            __dispatchWindowEvent("popstate", {
                 state: this.state
             });
 
             if (window.location.hash !== previousHash) {
-                return __dispatchWindowEvent("hashchange", {}) || popStateResult;
+                __dispatchWindowEvent("hashchange", {});
             }
-
-            return popStateResult;
         }
     },
     addEventListener: function(name, handler) {
@@ -820,7 +910,7 @@ function __clickAnchor(index) {
         return;
     }
 
-    return handler({
+    handler({
         defaultPrevented: false,
         button: 0,
         metaKey: false,
@@ -844,6 +934,9 @@ function __setLocationAndHistory(href, historyIndex, userState) {
     dotNetObjectReference._locationChangingHistoryGoSideEffects = [];
     dotNetObjectReference._locationChangingHashChangeSideEffects = [];
     dotNetObjectReference._locationChangingInvalidateSideEffects = [];
+    timers = [];
+    window._throwHistoryGoAfter = null;
+    window._ignoreHistoryGoAfter = null;
     window.location.href = href;
     if (historyIndex === null || historyIndex === undefined) {
         window.history.state = null;
@@ -890,12 +983,31 @@ function __enqueueLocationChangingInvalidateSideEffect(href, historyIndex, userS
 }
 
 function __historyGo(delta) {
-    return window.history.go(delta);
+    window.history.go(delta);
 }
 
 function __hashChangeTo(href, historyIndex, userState) {
     __setLocationAndHistoryEntry(href, historyIndex, userState);
-    return __dispatchWindowEvent("hashchange", {});
+    __dispatchWindowEvent("hashchange", {});
+}
+
+function __throwHistoryGoAfter(callCount) {
+    window._throwHistoryGoAfter = Number(callCount);
+}
+
+function __ignoreHistoryGoAfter(callCount) {
+    window._ignoreHistoryGoAfter = Number(callCount);
+}
+
+function __runTimers() {
+    const scheduledTimers = timers;
+    timers = [];
+
+    for (const timer of scheduledTimers) {
+        if (timer.active) {
+            timer.callback();
+        }
+    }
 }
 
 function __setLocationAndHistoryEntry(href, historyIndex, userState) {
@@ -910,10 +1022,8 @@ function __setLocationAndHistoryEntry(href, historyIndex, userState) {
 function __dispatchWindowEvent(name, event) {
     const handler = window._events[name];
     if (handler) {
-        return handler(event);
+        handler(event);
     }
-
-    return null;
 }
 
 function __syncLocation() {

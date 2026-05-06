@@ -29,6 +29,8 @@ const hashRoutingState = {
     lastProcessedBrowserNavigationKey: "",
 };
 
+const suppressedBrowserNavigationTimeoutMilliseconds = 100;
+
 export function initialize(dotNetObjectReference, options, baseUri, currentPathUri) {
     hashRoutingState.dotNetObjectReference = dotNetObjectReference;
     hashRoutingState.options = normalizeOptions(options);
@@ -329,9 +331,9 @@ async function processBrowserNavigation(rawLocation, interceptedLink) {
     hashRoutingState.pendingBrowserNavigation = browserNavigation;
 
     try {
-        if (canRevertWithHistory) {
-            await navigateHistoryWithoutBrowserNavigationEvents(-historyDelta);
-        }
+        const revertedWithHistory = canRevertWithHistory
+            ? await navigateHistoryWithoutBrowserNavigationEvents(-historyDelta)
+            : false;
 
         if (browserNavigationId !== hashRoutingState.currentBrowserNavigationId) {
             return;
@@ -353,7 +355,7 @@ async function processBrowserNavigation(rawLocation, interceptedLink) {
             return;
         }
 
-        if (canRevertWithHistory) {
+        if (revertedWithHistory) {
             await navigateHistoryWithoutBrowserNavigationEvents(historyDelta);
         }
 
@@ -448,26 +450,57 @@ function createBrowserNavigation(rawLocation) {
 }
 
 function completeSuppressedBrowserNavigationEvent(navigationKey) {
-    const resolver = hashRoutingState.suppressedBrowserNavigationEventResolvers.shift();
-    if (!resolver) {
+    const resolverEntry = hashRoutingState.suppressedBrowserNavigationEventResolvers.shift();
+    if (!resolverEntry) {
         return false;
     }
 
+    if (resolverEntry.timeoutId !== null) {
+        clearTimeout(resolverEntry.timeoutId);
+    }
+
     hashRoutingState.lastSuppressedBrowserNavigationKey = navigationKey;
-    resolver();
+    resolverEntry.resolve(true);
 
     return true;
 }
 
 function navigateHistoryWithoutBrowserNavigationEvents(delta) {
     if (delta === 0 || typeof window.history.go !== "function") {
-        return Promise.resolve();
+        return Promise.resolve(false);
     }
 
     return new Promise(function (resolve) {
-        hashRoutingState.suppressedBrowserNavigationEventResolvers.push(resolve);
-        window.history.go(delta);
+        const resolverEntry = {
+            resolve,
+            timeoutId: null,
+        };
+
+        resolverEntry.timeoutId = setTimeout(function () {
+            removeSuppressedBrowserNavigationEventResolver(resolverEntry);
+            resolve(false);
+        }, suppressedBrowserNavigationTimeoutMilliseconds);
+
+        hashRoutingState.suppressedBrowserNavigationEventResolvers.push(resolverEntry);
+
+        try {
+            window.history.go(delta);
+        } catch {
+            if (resolverEntry.timeoutId !== null) {
+                clearTimeout(resolverEntry.timeoutId);
+            }
+
+            removeSuppressedBrowserNavigationEventResolver(resolverEntry);
+            resolve(false);
+        }
     });
+}
+
+function removeSuppressedBrowserNavigationEventResolver(resolverEntry) {
+    const resolverIndex = hashRoutingState.suppressedBrowserNavigationEventResolvers.indexOf(resolverEntry);
+    if (resolverIndex >= 0) {
+        hashRoutingState.suppressedBrowserNavigationEventResolvers.splice(resolverIndex, 1);
+    }
 }
 
 async function canContinueNavigation(pathAbsoluteUri, historyEntryState, interceptedLink) {
