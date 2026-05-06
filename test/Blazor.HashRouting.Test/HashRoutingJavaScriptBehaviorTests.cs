@@ -279,6 +279,28 @@ namespace Blazor.HashRouting.Test
         }
 
         [Fact]
+        public void GIVEN_DeniedBrowserNavigationThenProgrammaticNavigation_WHEN_ReturningToSuppressedEntry_THEN_BlazorIsNotified()
+        {
+            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
+            _target.NavigateTo("http://localhost/first", false, "first");
+            _target.NavigateTo("http://localhost/second", false, "second");
+            _target.SetNavigationLockState(true);
+            _target.EnqueueLocationChangingResult(false);
+
+            _target.HistoryGo(-1);
+            _target.ProcessTasks();
+
+            _target.NavigateTo("http://localhost/third", false, "third");
+            _target.EnqueueLocationChangingResult(true);
+
+            _target.HistoryGo(-1);
+            _target.ProcessTasks();
+
+            _target.GetLocationHref().Should().Be("http://localhost/#/second");
+            _target.GetLocationChangedCalls().Should().ContainSingle().Which.Location.Should().Be("http://localhost/second");
+        }
+
+        [Fact]
         public void GIVEN_InternalAnchorClicked_WHEN_LinkNavigationAllowed_THEN_LinkNavigationStillPushesHistoryAndNotifiesOnce()
         {
             var anchorIndex = _target.AppendAnchor("settings");
@@ -302,61 +324,6 @@ namespace Blazor.HashRouting.Test
         }
 
         [Fact]
-        public void GIVEN_HistoryGoThrowsDuringSuppressedNavigation_WHEN_BrowserNavigationAllowed_THEN_NavigationStillCompletes()
-        {
-            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
-            _target.NavigateTo("http://localhost/first", false, "first");
-            _target.NavigateTo("http://localhost/second", false, "second");
-            _target.SetNavigationLockState(true);
-            _target.EnqueueLocationChangingResult(true);
-            _target.ThrowSuppressedHistoryGo();
-
-            _target.HistoryGo(-1);
-            _target.ProcessTasks();
-
-            _target.GetLocationHref().Should().Be("http://localhost/#/first");
-            _target.GetLocationChangedCalls().Should().ContainSingle().Which.Location.Should().Be("http://localhost/first");
-        }
-
-        [Fact]
-        public void GIVEN_HistoryGoIsIgnoredDuringSuppressedNavigation_WHEN_TimeoutRuns_THEN_NextBrowserNavigationIsNotSuppressed()
-        {
-            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
-            _target.NavigateTo("http://localhost/first", false, "first");
-            _target.NavigateTo("http://localhost/second", false, "second");
-            _target.SetNavigationLockState(true);
-            _target.EnqueueLocationChangingResult(true);
-            _target.IgnoreSuppressedHistoryGo();
-
-            _target.HistoryGo(-1);
-            _target.ProcessTasks();
-
-            _target.GetLocationChangedCalls().Should().ContainSingle().Which.Location.Should().Be("http://localhost/first");
-
-            _target.HistoryGo(1);
-            _target.ProcessTasks();
-
-            _target.GetLocationChangedCalls().Last().Location.Should().Be("http://localhost/second");
-        }
-
-        [Fact]
-        public void GIVEN_HistoryRevertIsIgnoredAndNavigationDenied_WHEN_LockCheckCompletes_THEN_BrowserRollsBackToLastAcceptedUrl()
-        {
-            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
-            _target.NavigateTo("http://localhost/first", false, "first");
-            _target.NavigateTo("http://localhost/second", false, "second");
-            _target.SetNavigationLockState(true);
-            _target.EnqueueLocationChangingResult(false);
-            _target.IgnoreSuppressedHistoryGo();
-
-            _target.HistoryGo(-1);
-            _target.ProcessTasks();
-
-            _target.GetLocationHref().Should().Be("http://localhost/#/second");
-            _target.GetLocationChangedCalls().Should().BeEmpty();
-        }
-
-        [Fact]
         public void GIVEN_UnrelatedBrowserNavigationArrivesDuringSuppressedWait_WHEN_NavigationKeysDoNotMatch_THEN_UnrelatedNavigationIsProcessed()
         {
             _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
@@ -368,50 +335,6 @@ namespace Blazor.HashRouting.Test
             _target.GetLocationHref().Should().Be("http://localhost/#/third");
             _target.GetLocationChangedCalls().Should().ContainSingle().Which.Location.Should().Be("http://localhost/third");
             _target.GetSuppressedBrowserNavigationResolverCount().Should().Be(1);
-        }
-
-        [Fact]
-        public void GIVEN_HistoryReapplyThrowsAfterAllowedNavigation_WHEN_LockCheckCompletes_THEN_RevertedHistoryEntryIsNotRewritten()
-        {
-            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
-            _target.NavigateTo("http://localhost/first", false, "first");
-            _target.NavigateTo("http://localhost/second", false, "second");
-            _target.SetNavigationLockState(true);
-            _target.EnqueueLocationChangingResult(true);
-            _target.ThrowReapplyHistoryGo();
-
-            _target.HistoryGo(-1);
-            _target.ProcessTasks();
-
-            _target.GetLocationHref().Should().Be("http://localhost/#/second");
-            _target.GetHistoryState().Should().BeEquivalentTo(new BrowserHistoryState
-            {
-                HistoryIndex = 2,
-                UserState = "second"
-            });
-            _target.GetLocationChangedCalls().Should().BeEmpty();
-        }
-
-        [Fact]
-        public void GIVEN_HistoryReapplyIsIgnoredAfterAllowedNavigation_WHEN_TimeoutRuns_THEN_RevertedHistoryEntryIsNotRewritten()
-        {
-            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
-            _target.NavigateTo("http://localhost/first", false, "first");
-            _target.NavigateTo("http://localhost/second", false, "second");
-            _target.SetNavigationLockState(true);
-            _target.EnqueueLocationChangingResult(true);
-            _target.IgnoreReapplyHistoryGo();
-
-            _target.HistoryGo(-1);
-            _target.ProcessTasks();
-
-            _target.GetLocationHref().Should().Be("http://localhost/#/second");
-            _target.GetHistoryState().Should().BeEquivalentTo(new BrowserHistoryState
-            {
-                HistoryIndex = 2,
-                UserState = "second"
-            });
-            _target.GetLocationChangedCalls().Should().BeEmpty();
         }
 
         private sealed class HashRoutingJavaScriptTestHost
@@ -563,26 +486,6 @@ namespace Blazor.HashRouting.Test
             public int GetSuppressedBrowserNavigationResolverCount()
             {
                 return (int)_engine.Invoke("__getSuppressedBrowserNavigationResolverCount").AsNumber();
-            }
-
-            public void ThrowSuppressedHistoryGo()
-            {
-                _engine.Invoke("__throwHistoryGoAfter", 1);
-            }
-
-            public void IgnoreSuppressedHistoryGo()
-            {
-                _engine.Invoke("__ignoreHistoryGoAfter", 1);
-            }
-
-            public void ThrowReapplyHistoryGo()
-            {
-                _engine.Invoke("__throwHistoryGoAfter", 2);
-            }
-
-            public void IgnoreReapplyHistoryGo()
-            {
-                _engine.Invoke("__ignoreHistoryGoAfter", 2);
             }
 
             public void ProcessTasks()
@@ -1093,8 +996,7 @@ function __enqueueSuppressedBrowserNavigationResolver(href, historyIndex, userSt
     hashRoutingState.suppressedBrowserNavigationEventResolvers.push({
         navigationKey: createBrowserNavigationKey(targetHashAbsoluteUri, Number(historyIndex), historyEntryState),
         resolve: function() {
-        },
-        timeoutId: null
+        }
     });
 }
 

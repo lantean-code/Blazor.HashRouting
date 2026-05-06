@@ -29,8 +29,6 @@ const hashRoutingState = {
     lastProcessedBrowserNavigationKey: "",
 };
 
-const suppressedBrowserNavigationTimeoutMilliseconds = 100;
-
 export function initialize(dotNetObjectReference, options, baseUri, currentPathUri) {
     hashRoutingState.dotNetObjectReference = dotNetObjectReference;
     hashRoutingState.options = normalizeOptions(options);
@@ -332,9 +330,9 @@ async function processBrowserNavigation(rawLocation, interceptedLink) {
     hashRoutingState.pendingBrowserNavigation = browserNavigation;
 
     try {
-        const revertedWithHistory = canRevertWithHistory
-            ? await navigateHistoryWithoutBrowserNavigationEvents(-historyDelta, revertNavigationKey)
-            : false;
+        if (canRevertWithHistory) {
+            await navigateHistoryWithoutBrowserNavigationEvents(-historyDelta, revertNavigationKey);
+        }
 
         if (browserNavigationId !== hashRoutingState.currentBrowserNavigationId) {
             return;
@@ -348,7 +346,7 @@ async function processBrowserNavigation(rawLocation, interceptedLink) {
         }
 
         if (!shouldContinue) {
-            if (!revertedWithHistory && hashRoutingState.lastAcceptedHashAbsoluteUri) {
+            if (!canRevertWithHistory && hashRoutingState.lastAcceptedHashAbsoluteUri) {
                 const rollbackState = withHistoryMetadata(window.history.state, hashRoutingState.lastAcceptedHistoryState, hashRoutingState.currentHistoryIndex);
                 window.history.replaceState(rollbackState, "", hashRoutingState.lastAcceptedHashAbsoluteUri);
             }
@@ -356,11 +354,8 @@ async function processBrowserNavigation(rawLocation, interceptedLink) {
             return;
         }
 
-        if (revertedWithHistory) {
-            const reappliedWithHistory = await navigateHistoryWithoutBrowserNavigationEvents(historyDelta, browserNavigation.navigationKey);
-            if (!reappliedWithHistory) {
-                return;
-            }
+        if (canRevertWithHistory) {
+            await navigateHistoryWithoutBrowserNavigationEvents(historyDelta, browserNavigation.navigationKey);
         }
 
         if (browserNavigationId !== hashRoutingState.currentBrowserNavigationId) {
@@ -423,6 +418,7 @@ function ignorePendingBrowserNavigation() {
     hashRoutingState.currentBrowserNavigationId++;
     hashRoutingState.activeBrowserNavigationKey = "";
     hashRoutingState.pendingBrowserNavigation = null;
+    hashRoutingState.lastSuppressedBrowserNavigationKey = "";
 }
 
 function createBrowserNavigation(rawLocation) {
@@ -461,46 +457,26 @@ function completeSuppressedBrowserNavigationEvent(navigationKey) {
         return false;
     }
 
-    if (resolverEntry.timeoutId !== null) {
-        clearTimeout(resolverEntry.timeoutId);
-    }
-
     removeSuppressedBrowserNavigationEventResolver(resolverEntry);
     hashRoutingState.lastSuppressedBrowserNavigationKey = navigationKey;
-    resolverEntry.resolve(true);
+    resolverEntry.resolve();
 
     return true;
 }
 
 function navigateHistoryWithoutBrowserNavigationEvents(delta, navigationKey) {
     if (delta === 0 || typeof window.history.go !== "function") {
-        return Promise.resolve(false);
+        return Promise.resolve();
     }
 
     return new Promise(function (resolve) {
         const resolverEntry = {
             navigationKey,
             resolve,
-            timeoutId: null,
         };
 
-        resolverEntry.timeoutId = setTimeout(function () {
-            removeSuppressedBrowserNavigationEventResolver(resolverEntry);
-            resolve(false);
-        }, suppressedBrowserNavigationTimeoutMilliseconds);
-
         hashRoutingState.suppressedBrowserNavigationEventResolvers.push(resolverEntry);
-
-        try {
-            window.history.go(delta);
-        } catch {
-            if (resolverEntry.timeoutId !== null) {
-                clearTimeout(resolverEntry.timeoutId);
-            }
-
-            removeSuppressedBrowserNavigationEventResolver(resolverEntry);
-            resolve(false);
-        }
+        window.history.go(delta);
     });
 }
 
