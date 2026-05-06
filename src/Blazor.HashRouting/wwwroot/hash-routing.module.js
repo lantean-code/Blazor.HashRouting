@@ -357,7 +357,10 @@ async function processBrowserNavigation(rawLocation, interceptedLink) {
         }
 
         if (revertedWithHistory) {
-            await navigateHistoryWithoutBrowserNavigationEvents(historyDelta, browserNavigation.navigationKey);
+            const reappliedWithHistory = await navigateHistoryWithoutBrowserNavigationEvents(historyDelta, browserNavigation.navigationKey);
+            if (!reappliedWithHistory) {
+                return;
+            }
         }
 
         if (browserNavigationId !== hashRoutingState.currentBrowserNavigationId) {

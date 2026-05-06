@@ -370,6 +370,50 @@ namespace Blazor.HashRouting.Test
             _target.GetSuppressedBrowserNavigationResolverCount().Should().Be(1);
         }
 
+        [Fact]
+        public void GIVEN_HistoryReapplyThrowsAfterAllowedNavigation_WHEN_LockCheckCompletes_THEN_RevertedHistoryEntryIsNotRewritten()
+        {
+            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
+            _target.NavigateTo("http://localhost/first", false, "first");
+            _target.NavigateTo("http://localhost/second", false, "second");
+            _target.SetNavigationLockState(true);
+            _target.EnqueueLocationChangingResult(true);
+            _target.ThrowReapplyHistoryGo();
+
+            _target.HistoryGo(-1);
+            _target.ProcessTasks();
+
+            _target.GetLocationHref().Should().Be("http://localhost/#/second");
+            _target.GetHistoryState().Should().BeEquivalentTo(new BrowserHistoryState
+            {
+                HistoryIndex = 2,
+                UserState = "second"
+            });
+            _target.GetLocationChangedCalls().Should().BeEmpty();
+        }
+
+        [Fact]
+        public void GIVEN_HistoryReapplyIsIgnoredAfterAllowedNavigation_WHEN_TimeoutRuns_THEN_RevertedHistoryEntryIsNotRewritten()
+        {
+            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
+            _target.NavigateTo("http://localhost/first", false, "first");
+            _target.NavigateTo("http://localhost/second", false, "second");
+            _target.SetNavigationLockState(true);
+            _target.EnqueueLocationChangingResult(true);
+            _target.IgnoreReapplyHistoryGo();
+
+            _target.HistoryGo(-1);
+            _target.ProcessTasks();
+
+            _target.GetLocationHref().Should().Be("http://localhost/#/second");
+            _target.GetHistoryState().Should().BeEquivalentTo(new BrowserHistoryState
+            {
+                HistoryIndex = 2,
+                UserState = "second"
+            });
+            _target.GetLocationChangedCalls().Should().BeEmpty();
+        }
+
         private sealed class HashRoutingJavaScriptTestHost
         {
             private readonly Engine _engine;
@@ -529,6 +573,16 @@ namespace Blazor.HashRouting.Test
             public void IgnoreSuppressedHistoryGo()
             {
                 _engine.Invoke("__ignoreHistoryGoAfter", 1);
+            }
+
+            public void ThrowReapplyHistoryGo()
+            {
+                _engine.Invoke("__throwHistoryGoAfter", 2);
+            }
+
+            public void IgnoreReapplyHistoryGo()
+            {
+                _engine.Invoke("__ignoreHistoryGoAfter", 2);
             }
 
             public void ProcessTasks()
