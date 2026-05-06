@@ -339,6 +339,37 @@ namespace Blazor.HashRouting.Test
             _target.GetLocationChangedCalls().Last().Location.Should().Be("http://localhost/second");
         }
 
+        [Fact]
+        public void GIVEN_HistoryRevertIsIgnoredAndNavigationDenied_WHEN_LockCheckCompletes_THEN_BrowserRollsBackToLastAcceptedUrl()
+        {
+            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
+            _target.NavigateTo("http://localhost/first", false, "first");
+            _target.NavigateTo("http://localhost/second", false, "second");
+            _target.SetNavigationLockState(true);
+            _target.EnqueueLocationChangingResult(false);
+            _target.IgnoreSuppressedHistoryGo();
+
+            _target.HistoryGo(-1);
+            _target.ProcessTasks();
+
+            _target.GetLocationHref().Should().Be("http://localhost/#/second");
+            _target.GetLocationChangedCalls().Should().BeEmpty();
+        }
+
+        [Fact]
+        public void GIVEN_UnrelatedBrowserNavigationArrivesDuringSuppressedWait_WHEN_NavigationKeysDoNotMatch_THEN_UnrelatedNavigationIsProcessed()
+        {
+            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
+            _target.EnqueueSuppressedBrowserNavigationResolver("http://localhost/#/expected", 99, "expected");
+
+            _target.HashChangeTo("http://localhost/#/third", 3, "third");
+            _target.ProcessTasks();
+
+            _target.GetLocationHref().Should().Be("http://localhost/#/third");
+            _target.GetLocationChangedCalls().Should().ContainSingle().Which.Location.Should().Be("http://localhost/third");
+            _target.GetSuppressedBrowserNavigationResolverCount().Should().Be(1);
+        }
+
         private sealed class HashRoutingJavaScriptTestHost
         {
             private readonly Engine _engine;
@@ -478,6 +509,16 @@ namespace Blazor.HashRouting.Test
             public void HashChangeTo(string href, int historyIndex, string? userState)
             {
                 _engine.Invoke("__hashChangeTo", href, historyIndex, userState ?? JsValue.Null);
+            }
+
+            public void EnqueueSuppressedBrowserNavigationResolver(string href, int historyIndex, string? userState)
+            {
+                _engine.Invoke("__enqueueSuppressedBrowserNavigationResolver", href, historyIndex, userState ?? JsValue.Null);
+            }
+
+            public int GetSuppressedBrowserNavigationResolverCount()
+            {
+                return (int)_engine.Invoke("__getSuppressedBrowserNavigationResolverCount").AsNumber();
             }
 
             public void ThrowSuppressedHistoryGo()
@@ -989,6 +1030,22 @@ function __historyGo(delta) {
 function __hashChangeTo(href, historyIndex, userState) {
     __setLocationAndHistoryEntry(href, historyIndex, userState);
     __dispatchWindowEvent("hashchange", {});
+}
+
+function __enqueueSuppressedBrowserNavigationResolver(href, historyIndex, userState) {
+    const historyEntryState = userState === undefined ? null : userState;
+    const targetPathAbsoluteUri = toPathAbsoluteUri(href, hashRoutingState.baseUri, hashRoutingState.normalizedHashPrefix);
+    const targetHashAbsoluteUri = toHashAbsoluteUri(targetPathAbsoluteUri, hashRoutingState.baseUri, hashRoutingState.normalizedHashPrefix);
+    hashRoutingState.suppressedBrowserNavigationEventResolvers.push({
+        navigationKey: createBrowserNavigationKey(targetHashAbsoluteUri, Number(historyIndex), historyEntryState),
+        resolve: function() {
+        },
+        timeoutId: null
+    });
+}
+
+function __getSuppressedBrowserNavigationResolverCount() {
+    return hashRoutingState.suppressedBrowserNavigationEventResolvers.length;
 }
 
 function __throwHistoryGoAfter(callCount) {

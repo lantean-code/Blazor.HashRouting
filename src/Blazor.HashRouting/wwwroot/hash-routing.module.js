@@ -323,6 +323,7 @@ async function processBrowserNavigation(rawLocation, interceptedLink) {
     const browserNavigationId = ++hashRoutingState.currentBrowserNavigationId;
     const previousHistoryIndex = hashRoutingState.currentHistoryIndex;
     const historyDelta = browserNavigation.historyIndex - previousHistoryIndex;
+    const revertNavigationKey = createBrowserNavigationKey(hashRoutingState.lastAcceptedHashAbsoluteUri, previousHistoryIndex, hashRoutingState.lastAcceptedHistoryState);
     const canRevertWithHistory = hashRoutingState.navigationLockEnabled
         && historyDelta !== 0
         && typeof window.history.go === "function";
@@ -332,7 +333,7 @@ async function processBrowserNavigation(rawLocation, interceptedLink) {
 
     try {
         const revertedWithHistory = canRevertWithHistory
-            ? await navigateHistoryWithoutBrowserNavigationEvents(-historyDelta)
+            ? await navigateHistoryWithoutBrowserNavigationEvents(-historyDelta, revertNavigationKey)
             : false;
 
         if (browserNavigationId !== hashRoutingState.currentBrowserNavigationId) {
@@ -347,7 +348,7 @@ async function processBrowserNavigation(rawLocation, interceptedLink) {
         }
 
         if (!shouldContinue) {
-            if (!canRevertWithHistory && hashRoutingState.lastAcceptedHashAbsoluteUri) {
+            if (!revertedWithHistory && hashRoutingState.lastAcceptedHashAbsoluteUri) {
                 const rollbackState = withHistoryMetadata(window.history.state, hashRoutingState.lastAcceptedHistoryState, hashRoutingState.currentHistoryIndex);
                 window.history.replaceState(rollbackState, "", hashRoutingState.lastAcceptedHashAbsoluteUri);
             }
@@ -356,7 +357,7 @@ async function processBrowserNavigation(rawLocation, interceptedLink) {
         }
 
         if (revertedWithHistory) {
-            await navigateHistoryWithoutBrowserNavigationEvents(historyDelta);
+            await navigateHistoryWithoutBrowserNavigationEvents(historyDelta, browserNavigation.navigationKey);
         }
 
         if (browserNavigationId !== hashRoutingState.currentBrowserNavigationId) {
@@ -450,7 +451,9 @@ function createBrowserNavigation(rawLocation) {
 }
 
 function completeSuppressedBrowserNavigationEvent(navigationKey) {
-    const resolverEntry = hashRoutingState.suppressedBrowserNavigationEventResolvers.shift();
+    const resolverEntry = hashRoutingState.suppressedBrowserNavigationEventResolvers.find(function (entry) {
+        return entry.navigationKey === navigationKey;
+    });
     if (!resolverEntry) {
         return false;
     }
@@ -459,19 +462,21 @@ function completeSuppressedBrowserNavigationEvent(navigationKey) {
         clearTimeout(resolverEntry.timeoutId);
     }
 
+    removeSuppressedBrowserNavigationEventResolver(resolverEntry);
     hashRoutingState.lastSuppressedBrowserNavigationKey = navigationKey;
     resolverEntry.resolve(true);
 
     return true;
 }
 
-function navigateHistoryWithoutBrowserNavigationEvents(delta) {
+function navigateHistoryWithoutBrowserNavigationEvents(delta, navigationKey) {
     if (delta === 0 || typeof window.history.go !== "function") {
         return Promise.resolve(false);
     }
 
     return new Promise(function (resolve) {
         const resolverEntry = {
+            navigationKey,
             resolve,
             timeoutId: null,
         };
