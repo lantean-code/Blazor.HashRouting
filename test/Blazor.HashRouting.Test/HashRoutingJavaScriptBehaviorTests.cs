@@ -194,6 +194,149 @@ namespace Blazor.HashRouting.Test
             _target.GetAnchorHref(anchorIndex).Should().Be("http://localhost/settings");
         }
 
+        [Fact]
+        public void GIVEN_RapidBrowserNavigationsBeforeLockCheckRuns_WHEN_LatestNavigationAllowed_THEN_BlazorIsNotifiedForLatestBrowserUrlOnly()
+        {
+            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
+            _target.NavigateTo("http://localhost/first", false, "first");
+            _target.NavigateTo("http://localhost/second", false, "second");
+            _target.NavigateTo("http://localhost/third", false, "third");
+            _target.SetNavigationLockState(true);
+            _target.EnqueueLocationChangingResult(true);
+
+            _target.HistoryGo(-2);
+            _target.HistoryGo(1);
+            _target.ProcessTasks();
+
+            _target.GetLocationChangingCalls().Last().Location.Should().Be("http://localhost/second");
+            _target.GetLocationHref().Should().Be("http://localhost/#/second");
+            _target.GetLocationChangedCalls().Last().Location.Should().Be("http://localhost/second");
+        }
+
+        [Fact]
+        public void GIVEN_StaleDeniedBrowserNavigation_WHEN_NewerNavigationIsPending_THEN_StaleResultDoesNotRollback()
+        {
+            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
+            _target.NavigateTo("http://localhost/first", false, "first");
+            _target.NavigateTo("http://localhost/second", false, "second");
+            _target.NavigateTo("http://localhost/third", false, "third");
+            _target.SetNavigationLockState(true);
+            _target.EnqueueLocationChangingInvalidateSideEffect("http://localhost/#/second", 3, "second");
+            _target.EnqueueLocationChangingResult(false);
+
+            _target.HashChangeTo("http://localhost/#/first", 3, "first");
+
+            _target.GetLocationHref().Should().Be("http://localhost/#/second");
+            _target.GetLocationChangedCalls().Should().BeEmpty();
+        }
+
+        [Fact]
+        public void GIVEN_StaleAllowedBrowserNavigation_WHEN_NewerNavigationIsPending_THEN_StaleResultDoesNotNotify()
+        {
+            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
+            _target.NavigateTo("http://localhost/first", false, "first");
+            _target.NavigateTo("http://localhost/second", false, "second");
+            _target.NavigateTo("http://localhost/third", false, "third");
+            _target.SetNavigationLockState(true);
+            _target.EnqueueLocationChangingHashChangeSideEffect("http://localhost/#/second", 3, "second");
+            _target.EnqueueLocationChangingResult(true);
+            _target.EnqueueLocationChangingResult(true);
+
+            _target.HashChangeTo("http://localhost/#/first", 3, "first");
+
+            _target.GetLocationHref().Should().Be("http://localhost/#/second");
+            _target.GetLocationChangedCalls().Should().ContainSingle().Which.Location.Should().Be("http://localhost/second");
+        }
+
+        [Fact]
+        public void GIVEN_PopStateAndHashChangePair_WHEN_BrowserNavigates_THEN_BlazorIsNotifiedOnce()
+        {
+            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
+            _target.NavigateTo("http://localhost/first", false, "first");
+            _target.NavigateTo("http://localhost/second", false, "second");
+
+            _target.HistoryGo(-1);
+            _target.ProcessTasks();
+
+            _target.GetLocationHref().Should().Be("http://localhost/#/first");
+            _target.GetLocationChangedCalls().Should().ContainSingle().Which.Location.Should().Be("http://localhost/first");
+        }
+
+        [Fact]
+        public void GIVEN_LatestBrowserNavigationDenied_WHEN_LockCheckCompletes_THEN_BrowserRemainsOnLastAcceptedUrl()
+        {
+            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
+            _target.NavigateTo("http://localhost/first", false, "first");
+            _target.NavigateTo("http://localhost/second", false, "second");
+            _target.SetNavigationLockState(true);
+            _target.EnqueueLocationChangingResult(false);
+
+            _target.HistoryGo(-1);
+            _target.ProcessTasks();
+
+            _target.GetLocationHref().Should().Be("http://localhost/#/second");
+            _target.GetLocationChangedCalls().Should().BeEmpty();
+        }
+
+        [Fact]
+        public void GIVEN_DeniedBrowserNavigationThenProgrammaticNavigation_WHEN_ReturningToSuppressedEntry_THEN_BlazorIsNotified()
+        {
+            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
+            _target.NavigateTo("http://localhost/first", false, "first");
+            _target.NavigateTo("http://localhost/second", false, "second");
+            _target.SetNavigationLockState(true);
+            _target.EnqueueLocationChangingResult(false);
+
+            _target.HistoryGo(-1);
+            _target.ProcessTasks();
+
+            _target.NavigateTo("http://localhost/third", false, "third");
+            _target.EnqueueLocationChangingResult(true);
+
+            _target.HistoryGo(-1);
+            _target.ProcessTasks();
+
+            _target.GetLocationHref().Should().Be("http://localhost/#/second");
+            _target.GetLocationChangedCalls().Should().ContainSingle().Which.Location.Should().Be("http://localhost/second");
+        }
+
+        [Fact]
+        public void GIVEN_InternalAnchorClicked_WHEN_LinkNavigationAllowed_THEN_LinkNavigationStillPushesHistoryAndNotifiesOnce()
+        {
+            var anchorIndex = _target.AppendAnchor("settings");
+            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
+
+            _target.ClickAnchor(anchorIndex);
+            _target.ProcessTasks();
+
+            _target.GetLocationHref().Should().Be("http://localhost/#/settings");
+            _target.GetHistoryState().Should().BeEquivalentTo(new BrowserHistoryState
+            {
+                HistoryIndex = 1,
+                UserState = null
+            });
+            _target.GetLocationChangedCalls().Should().ContainSingle().Which.Should().BeEquivalentTo(new BrowserLocationChangedCall
+            {
+                Location = "http://localhost/settings",
+                HistoryEntryState = null,
+                IsNavigationIntercepted = true
+            });
+        }
+
+        [Fact]
+        public void GIVEN_UnrelatedBrowserNavigationArrivesDuringSuppressedWait_WHEN_NavigationKeysDoNotMatch_THEN_UnrelatedNavigationIsProcessed()
+        {
+            _target.Initialize("http://localhost/", "http://localhost/#/", "http://localhost/");
+            _target.EnqueueSuppressedBrowserNavigationResolver("http://localhost/#/expected", 99, "expected");
+
+            _target.HashChangeTo("http://localhost/#/third", 3, "third");
+            _target.ProcessTasks();
+
+            _target.GetLocationHref().Should().Be("http://localhost/#/third");
+            _target.GetLocationChangedCalls().Should().ContainSingle().Which.Location.Should().Be("http://localhost/third");
+            _target.GetSuppressedBrowserNavigationResolverCount().Should().Be(1);
+        }
+
         private sealed class HashRoutingJavaScriptTestHost
         {
             private readonly Engine _engine;
@@ -215,6 +358,20 @@ namespace Blazor.HashRouting.Test
                 var json = _engine.Invoke("__getHistoryStateJson").AsString();
 
                 return JsonSerializer.Deserialize<BrowserHistoryState>(json, _options);
+            }
+
+            public IReadOnlyList<BrowserLocationChangingCall> GetLocationChangingCalls()
+            {
+                var json = _engine.Invoke("__getLocationChangingCallsJson").AsString();
+
+                return JsonSerializer.Deserialize<List<BrowserLocationChangingCall>>(json, _options) ?? [];
+            }
+
+            public IReadOnlyList<BrowserLocationChangedCall> GetLocationChangedCalls()
+            {
+                var json = _engine.Invoke("__getLocationChangedCallsJson").AsString();
+
+                return JsonSerializer.Deserialize<List<BrowserLocationChangedCall>>(json, _options) ?? [];
             }
 
             public string GetLastReplacedHref()
@@ -251,6 +408,11 @@ namespace Blazor.HashRouting.Test
                 return _engine.Invoke("__getAnchorHref", index).AsString();
             }
 
+            public void ClickAnchor(int index)
+            {
+                _engine.Invoke("__clickAnchor", index);
+            }
+
             public string Initialize(string baseUri, string locationHref, string currentPathUri, object? options = null)
             {
                 _engine.Invoke("__setDocumentBaseUri", baseUri);
@@ -263,7 +425,7 @@ namespace Blazor.HashRouting.Test
                     interceptInternalLinks = true
                 };
 
-                return _engine.Invoke("initialize", _engine.GetValue("dotNetObjectReference"), initializeOptions, baseUri, currentPathUri).AsString();
+                return _engine.Invoke("initialize", _engine.Evaluate("dotNetObjectReference"), initializeOptions, baseUri, currentPathUri).AsString();
             }
 
             public void NavigateExternally(string uri, bool replaceHistoryEntry)
@@ -279,6 +441,60 @@ namespace Blazor.HashRouting.Test
             public void NavigateTo(string pathAbsoluteUri, bool replaceHistoryEntry, string? historyEntryState)
             {
                 _engine.Invoke("navigateTo", pathAbsoluteUri, replaceHistoryEntry, historyEntryState ?? JsValue.Null);
+            }
+
+            public void SetNavigationLockState(bool value)
+            {
+                _engine.Invoke("setNavigationLockState", value);
+            }
+
+            public void EnqueueLocationChangingResult(bool value)
+            {
+                _engine.Invoke("__enqueueLocationChangingResult", value);
+            }
+
+            public void EnqueueLocationChangingHistoryGoSideEffect(int delta)
+            {
+                _engine.Invoke("__enqueueLocationChangingHistoryGoSideEffect", delta);
+            }
+
+            public void EnqueueLocationChangingHashChangeSideEffect(string href, int historyIndex, string? userState)
+            {
+                _engine.Invoke("__enqueueLocationChangingHashChangeSideEffect", href, historyIndex, userState ?? JsValue.Null);
+            }
+
+            public void EnqueueLocationChangingInvalidateSideEffect(string href, int historyIndex, string? userState)
+            {
+                _engine.Invoke("__enqueueLocationChangingInvalidateSideEffect", href, historyIndex, userState ?? JsValue.Null);
+            }
+
+            public void HistoryGo(int delta)
+            {
+                _engine.Invoke("__historyGo", delta);
+            }
+
+            public void HashChangeTo(string href, int historyIndex, string? userState)
+            {
+                _engine.Invoke("__hashChangeTo", href, historyIndex, userState ?? JsValue.Null);
+            }
+
+            public void EnqueueSuppressedBrowserNavigationResolver(string href, int historyIndex, string? userState)
+            {
+                _engine.Invoke("__enqueueSuppressedBrowserNavigationResolver", href, historyIndex, userState ?? JsValue.Null);
+            }
+
+            public int GetSuppressedBrowserNavigationResolverCount()
+            {
+                return (int)_engine.Invoke("__getSuppressedBrowserNavigationResolverCount").AsNumber();
+            }
+
+            public void ProcessTasks()
+            {
+                for (var index = 0; index < 20; index++)
+                {
+                    _engine.Invoke("__runTimers");
+                    _engine.Advanced.ProcessTasks();
+                }
             }
 
             public void SetLocationAndHistory(string href, BrowserHistoryState? state)
@@ -435,10 +651,77 @@ MutationObserver.prototype.disconnect = function() {
 };
 
 const dotNetObjectReference = {
-    invokeMethodAsync: function() {
+    _locationChangingCalls: [],
+    _locationChangedCalls: [],
+    _locationChangingResults: [],
+    _locationChangingHistoryGoSideEffects: [],
+    _locationChangingHashChangeSideEffects: [],
+    _locationChangingInvalidateSideEffects: [],
+    invokeMethodAsync: function(methodName, location, historyEntryState, isNavigationIntercepted) {
+        if (methodName === "NotifyLocationChangingFromJs") {
+            this._locationChangingCalls.push({
+                location: location,
+                historyEntryState: historyEntryState,
+                isNavigationIntercepted: Boolean(isNavigationIntercepted)
+            });
+
+            if (this._locationChangingHistoryGoSideEffects.length > 0) {
+                window.history.go(this._locationChangingHistoryGoSideEffects.shift());
+            }
+
+            if (this._locationChangingHashChangeSideEffects.length > 0) {
+                const sideEffect = this._locationChangingHashChangeSideEffects.shift();
+                __hashChangeTo(sideEffect.href, sideEffect.historyIndex, sideEffect.userState);
+            }
+
+            if (this._locationChangingInvalidateSideEffects.length > 0) {
+                const sideEffect = this._locationChangingInvalidateSideEffects.shift();
+                __setLocationAndHistoryEntry(sideEffect.href, sideEffect.historyIndex, sideEffect.userState);
+                hashRoutingState.currentBrowserNavigationId++;
+            }
+
+            const result = this._locationChangingResults.length > 0
+                ? this._locationChangingResults.shift()
+                : true;
+
+            return Boolean(result);
+        }
+
+        if (methodName === "NotifyLocationChangedFromJs") {
+            this._locationChangedCalls.push({
+                location: location,
+                historyEntryState: historyEntryState,
+                isNavigationIntercepted: Boolean(isNavigationIntercepted)
+            });
+
+            return null;
+        }
+
         return null;
     }
 };
+
+let nextTimerId = 0;
+let timers = [];
+
+function setTimeout(callback) {
+    const timer = {
+        id: ++nextTimerId,
+        callback: callback,
+        active: true
+    };
+    timers.push(timer);
+
+    return timer.id;
+}
+
+function clearTimeout(timerId) {
+    for (const timer of timers) {
+        if (timer.id === timerId) {
+            timer.active = false;
+        }
+    }
+}
 
 const document = {
     baseURI: "http://localhost/",
@@ -470,6 +753,8 @@ const window = {
     _lastReplacedHref: "",
     _lastReloadedHref: "",
     _reloadCount: 0,
+    _throwHistoryGoAfter: null,
+    _ignoreHistoryGoAfter: null,
     location: {
         href: "http://localhost/#/",
         hash: "#/",
@@ -484,16 +769,77 @@ const window = {
         }
     },
     history: {
+        _entries: [],
+        _entryIndex: -1,
         state: null,
         pushState: function(state, unused, uri) {
+            const href = new URL(uri, window.location.href).href;
+            this._entries = this._entries.slice(0, this._entryIndex + 1);
+            this._entries.push({
+                href: href,
+                state: state
+            });
+            this._entryIndex = this._entries.length - 1;
             this.state = state;
-            window.location.href = new URL(uri, window.location.href).href;
+            window.location.href = href;
             __syncLocation();
         },
         replaceState: function(state, unused, uri) {
+            const href = new URL(uri, window.location.href).href;
+            if (this._entryIndex < 0) {
+                this._entries.push({
+                    href: href,
+                    state: state
+                });
+                this._entryIndex = 0;
+            } else {
+                this._entries[this._entryIndex] = {
+                    href: href,
+                    state: state
+                };
+            }
             this.state = state;
-            window.location.href = new URL(uri, window.location.href).href;
+            window.location.href = href;
             __syncLocation();
+        },
+        go: function(delta) {
+            if (window._throwHistoryGoAfter !== null) {
+                if (window._throwHistoryGoAfter <= 0) {
+                    window._throwHistoryGoAfter = null;
+                    throw new Error("history.go failed");
+                }
+
+                window._throwHistoryGoAfter--;
+            }
+
+            if (window._ignoreHistoryGoAfter !== null) {
+                if (window._ignoreHistoryGoAfter <= 0) {
+                    window._ignoreHistoryGoAfter = null;
+                    __runTimers();
+                    return;
+                }
+
+                window._ignoreHistoryGoAfter--;
+            }
+
+            const nextIndex = this._entryIndex + Number(delta);
+            if (nextIndex < 0 || nextIndex >= this._entries.length) {
+                return;
+            }
+
+            const previousHash = window.location.hash;
+            const entry = this._entries[nextIndex];
+            this._entryIndex = nextIndex;
+            this.state = entry.state;
+            window.location.href = entry.href;
+            __syncLocation();
+            __dispatchWindowEvent("popstate", {
+                state: this.state
+            });
+
+            if (window.location.hash !== previousHash) {
+                __dispatchWindowEvent("hashchange", {});
+            }
         }
     },
     addEventListener: function(name, handler) {
@@ -506,6 +852,14 @@ const window = {
 
 function __getHistoryStateJson() {
     return JSON.stringify(window.history.state);
+}
+
+function __getLocationChangingCallsJson() {
+    return JSON.stringify(dotNetObjectReference._locationChangingCalls);
+}
+
+function __getLocationChangedCallsJson() {
+    return JSON.stringify(dotNetObjectReference._locationChangedCalls);
 }
 
 function __getLastReplacedHref() {
@@ -547,10 +901,40 @@ function __getAnchorHref(index) {
     return document._anchors[index].href;
 }
 
+function __clickAnchor(index) {
+    const anchor = document._anchors[index];
+    const handler = document._events.click;
+    if (!handler) {
+        return;
+    }
+
+    handler({
+        defaultPrevented: false,
+        button: 0,
+        metaKey: false,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+        target: anchor,
+        preventDefault: function() {
+            this.defaultPrevented = true;
+        }
+    });
+}
+
 function __setLocationAndHistory(href, historyIndex, userState) {
     window._lastReplacedHref = "";
     window._lastReloadedHref = "";
     window._reloadCount = 0;
+    dotNetObjectReference._locationChangingCalls = [];
+    dotNetObjectReference._locationChangedCalls = [];
+    dotNetObjectReference._locationChangingResults = [];
+    dotNetObjectReference._locationChangingHistoryGoSideEffects = [];
+    dotNetObjectReference._locationChangingHashChangeSideEffects = [];
+    dotNetObjectReference._locationChangingInvalidateSideEffects = [];
+    timers = [];
+    window._throwHistoryGoAfter = null;
+    window._ignoreHistoryGoAfter = null;
     window.location.href = href;
     if (historyIndex === null || historyIndex === undefined) {
         window.history.state = null;
@@ -561,10 +945,98 @@ function __setLocationAndHistory(href, historyIndex, userState) {
         };
     }
     __syncLocation();
+    window.history._entries = [{
+        href: window.location.href,
+        state: window.history.state
+    }];
+    window.history._entryIndex = 0;
 }
 
 function __setCurrentHistoryIndex(value) {
     hashRoutingState.currentHistoryIndex = Number(value);
+}
+
+function __enqueueLocationChangingResult(value) {
+    dotNetObjectReference._locationChangingResults.push(Boolean(value));
+}
+
+function __enqueueLocationChangingHistoryGoSideEffect(delta) {
+    dotNetObjectReference._locationChangingHistoryGoSideEffects.push(Number(delta));
+}
+
+function __enqueueLocationChangingHashChangeSideEffect(href, historyIndex, userState) {
+    dotNetObjectReference._locationChangingHashChangeSideEffects.push({
+        href: href,
+        historyIndex: Number(historyIndex),
+        userState: userState === undefined ? null : userState
+    });
+}
+
+function __enqueueLocationChangingInvalidateSideEffect(href, historyIndex, userState) {
+    dotNetObjectReference._locationChangingInvalidateSideEffects.push({
+        href: href,
+        historyIndex: Number(historyIndex),
+        userState: userState === undefined ? null : userState
+    });
+}
+
+function __historyGo(delta) {
+    window.history.go(delta);
+}
+
+function __hashChangeTo(href, historyIndex, userState) {
+    __setLocationAndHistoryEntry(href, historyIndex, userState);
+    __dispatchWindowEvent("hashchange", {});
+}
+
+function __enqueueSuppressedBrowserNavigationResolver(href, historyIndex, userState) {
+    const historyEntryState = userState === undefined ? null : userState;
+    const targetPathAbsoluteUri = toPathAbsoluteUri(href, hashRoutingState.baseUri, hashRoutingState.normalizedHashPrefix);
+    const targetHashAbsoluteUri = toHashAbsoluteUri(targetPathAbsoluteUri, hashRoutingState.baseUri, hashRoutingState.normalizedHashPrefix);
+    hashRoutingState.suppressedBrowserNavigationEventResolvers.push({
+        navigationKey: createBrowserNavigationKey(targetHashAbsoluteUri, Number(historyIndex), historyEntryState),
+        resolve: function() {
+        }
+    });
+}
+
+function __getSuppressedBrowserNavigationResolverCount() {
+    return hashRoutingState.suppressedBrowserNavigationEventResolvers.length;
+}
+
+function __throwHistoryGoAfter(callCount) {
+    window._throwHistoryGoAfter = Number(callCount);
+}
+
+function __ignoreHistoryGoAfter(callCount) {
+    window._ignoreHistoryGoAfter = Number(callCount);
+}
+
+function __runTimers() {
+    const scheduledTimers = timers;
+    timers = [];
+
+    for (const timer of scheduledTimers) {
+        if (timer.active) {
+            timer.callback();
+        }
+    }
+}
+
+function __setLocationAndHistoryEntry(href, historyIndex, userState) {
+    window.location.href = href;
+    window.history.state = {
+        _qhrIndex: Number(historyIndex),
+        userState: userState === undefined ? null : userState
+    };
+    __syncLocation();
+}
+
+function __dispatchWindowEvent(name, event) {
+    const handler = window._events[name];
+    if (handler) {
+        handler(event);
+    }
 }
 
 function __syncLocation() {
@@ -751,6 +1223,30 @@ function __syncLocation() {
 
             [JsonPropertyName("userState")]
             public string? UserState { get; init; }
+        }
+
+        private sealed class BrowserLocationChangingCall
+        {
+            [JsonPropertyName("location")]
+            public string? Location { get; init; }
+
+            [JsonPropertyName("historyEntryState")]
+            public string? HistoryEntryState { get; init; }
+
+            [JsonPropertyName("isNavigationIntercepted")]
+            public bool IsNavigationIntercepted { get; init; }
+        }
+
+        private sealed class BrowserLocationChangedCall
+        {
+            [JsonPropertyName("location")]
+            public string? Location { get; init; }
+
+            [JsonPropertyName("historyEntryState")]
+            public string? HistoryEntryState { get; init; }
+
+            [JsonPropertyName("isNavigationIntercepted")]
+            public bool IsNavigationIntercepted { get; init; }
         }
     }
 }
